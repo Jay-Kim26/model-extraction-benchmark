@@ -36,9 +36,9 @@
 | 카테고리 | 공격 이름 | 논문 | 핵심 전략 |
 | :--- | :--- | :--- | :--- |
 | **베이스라인** | **Random** | - | 후보 풀(Pool)에서의 균등 무작위 샘플링. |
-| **능동 학습 (Active Learning)** | **ActiveThief** | [Pal et al. (2020)](https://arxiv.org/abs/2002.05646) | 불확실성(Uncertainty), K-Center, DFAL 샘플링 전략. |
+| **능동 학습 (Active Learning)** | **ActiveThief** | [Pal et al. (2020)](https://ojs.aaai.org/index.php/AAAI/article/view/5432) | 불확실성(Uncertainty), K-Center, DFAL 샘플링 전략. |
 | | **Blackbox Dissector** | [Wang et al. (2021)](https://arxiv.org/abs/2105.00623) | Grad-CAM 기반 중요 영역 삭제 및 샘플 선택. |
-| | **CloudLeak** | [Yu et al. (2020)](https://ndss-symposium.org/ndss-paper/cloudleak-large-scale-deep-learning-models-stealing-publicly-available-images/) | 적대적 예제(Adversarial Example) 생성 (FeatureFool). |
+| | **CloudLeak** | [Yu et al. (2020)](https://www.ndss-symposium.org/wp-content/uploads/2020/02/24178.pdf) | 적대적 예제(Adversarial Example) 생성 (FeatureFool). |
 | | **InverseNet** | [Gong et al. (2021)](https://www.ijcai.org/proceedings/2021/336) | 역변환(Inversion) 기반 샘플 복원. |
 | | **SwiftThief** | [Lee et al. (2024)](https://www.ijcai.org/proceedings/2024/47) | 대조 학습(Contrastive Learning, SimSiam) + 능동 선택. |
 | **데이터 프리 / 생성형 (Generative)** | **DFME** | [Truong et al. (2021)](https://arxiv.org/abs/2011.14779) | GAN 기반 쿼리 합성 (Min-Max 게임). |

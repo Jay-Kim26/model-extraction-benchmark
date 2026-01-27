@@ -36,9 +36,9 @@ We support **13 state-of-the-art attacks**, faithfully re-implemented from their
 | Category | Attack | Paper | Key Strategy |
 | :--- | :--- | :--- | :--- |
 | **Baseline** | **Random** | - | Uniform random sampling from pool. |
-| **Active Learning** | **ActiveThief** | [Pal et al. (2020)](https://arxiv.org/abs/2002.05646) | Uncertainty, K-Center, and DFAL sampling. |
+| **Active Learning** | **ActiveThief** | [Pal et al. (2020)](https://ojs.aaai.org/index.php/AAAI/article/view/5432) | Uncertainty, K-Center, and DFAL sampling. |
 | | **Blackbox Dissector** | [Wang et al. (2021)](https://arxiv.org/abs/2105.00623) | Grad-CAM based erasing & selection. |
-| | **CloudLeak** | [Yu et al. (2020)](https://ndss-symposium.org/ndss-paper/cloudleak-large-scale-deep-learning-models-stealing-publicly-available-images/) | Adversarial example generation (FeatureFool). |
+| | **CloudLeak** | [Yu et al. (2020)](https://www.ndss-symposium.org/wp-content/uploads/2020/02/24178.pdf) | Adversarial example generation (FeatureFool). |
 | | **InverseNet** | [Gong et al. (2021)](https://www.ijcai.org/proceedings/2021/336) | Inversion-based sample recovery. |
 | | **SwiftThief** | [Lee et al. (2024)](https://www.ijcai.org/proceedings/2024/47) | Contrastive learning (SimSiam) + Active selection. |
 | **Data-Free / Generative** | **DFME** | [Truong et al. (2021)](https://arxiv.org/abs/2011.14779) | GAN-based query synthesis (Min-Max game). |
