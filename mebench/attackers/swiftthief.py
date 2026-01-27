@@ -20,7 +20,7 @@ class SimSiamProjectionHead(nn.Module):
     """Projection head for SimSiam contrastive learning.
 
     Projects features to lower-dimensional space for contrastive learning.
-    Architecture: Linear -> BN -> ReLU -> Linear
+    Architecture: Linear -> BN -> ReLU -> Linear -> BN(affine=False)
     """
 
     def __init__(self, in_dim: int, proj_dim: int = 2048, hidden_dim: int = 2048):
@@ -30,6 +30,7 @@ class SimSiamProjectionHead(nn.Module):
             nn.BatchNorm1d(hidden_dim),
             nn.ReLU(inplace=True),
             nn.Linear(hidden_dim, proj_dim),
+            nn.BatchNorm1d(proj_dim, affine=False),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
