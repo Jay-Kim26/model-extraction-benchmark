@@ -157,6 +157,8 @@ class ActiveThief(BaseAttack):
         device = next(substitute.parameters()).device
         substitute.eval()
         
+        from tqdm import tqdm
+        
         # Create temporary dataloader for efficient batch inference
         subset = Subset(self.pool_dataset, indices)
         loader = DataLoader(subset, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=True)
@@ -166,7 +168,7 @@ class ActiveThief(BaseAttack):
         norm_std = self.norm_std.to(device)
         
         with torch.no_grad():
-            for x_batch, _ in loader:
+            for x_batch, _ in tqdm(loader, desc="Approx Labeling", leave=False):
                 x_batch = x_batch.to(device)
                 x_batch = (x_batch - norm_mean) / norm_std
                 logits = substitute(x_batch)
@@ -237,14 +239,18 @@ class ActiveThief(BaseAttack):
         
         # Initial distances from existing labeled set
         # Process in chunks to save memory
+        from tqdm import tqdm
         chunk_size = 1000
-        for i in range(0, x_l.size(0), chunk_size):
+        
+        # Initial distance calculation pbar
+        num_chunks = (x_l.size(0) + chunk_size - 1) // chunk_size
+        for i in tqdm(range(0, x_l.size(0), chunk_size), total=num_chunks, desc="K-Center Init", leave=False):
             chunk = x_l[i : i + chunk_size]
             dists = torch.cdist(x_u, chunk, p=2).min(dim=1).values
             min_dists = torch.minimum(min_dists, dists)
             
         selected_indices = []
-        for _ in range(min(k, len(candidate_indices))):
+        for _ in tqdm(range(min(k, len(candidate_indices))), desc="K-Center Greedy", leave=False):
             # Select point with max min_dist
             idx = torch.argmax(min_dists).item()
             selected_indices.append(candidate_indices[idx])
@@ -304,7 +310,8 @@ class ActiveThief(BaseAttack):
         perturbation_scores = []
         cursor = 0
         
-        for x_batch, _ in loader:
+        from tqdm import tqdm
+        for x_batch, _ in tqdm(loader, desc="DFAL Perturbation", leave=False):
             x_batch = x_batch.to(device)
             
             # DeepFool requires gradient access, so we clone and detach for safety but enable grad
@@ -546,7 +553,10 @@ class ActiveThief(BaseAttack):
         best_model_state = None
 
         # Training loop (epoch-based)
-        for epoch in range(self.max_epochs):
+        from tqdm import tqdm
+        
+        epochs_pbar = tqdm(range(self.max_epochs), desc="Training Substitute", leave=False)
+        for epoch in epochs_pbar:
             model.train()
             train_loss = 0.0
 
@@ -588,10 +598,11 @@ class ActiveThief(BaseAttack):
             else:
                 patience_counter += 1
 
-            print(f"Epoch {epoch}: Train Loss: {train_loss/len(train_loader):.4f}, Val F1: {val_f1:.4f}")
+            epochs_pbar.set_postfix({"loss": f"{train_loss/len(train_loader):.4f}", "val_f1": f"{val_f1:.4f}"})
 
             # Early stopping
             if patience_counter >= self.patience:
+                epochs_pbar.close()
                 print(f"Early stopping at epoch {epoch}")
                 break
 
