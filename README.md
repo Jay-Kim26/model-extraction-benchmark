@@ -37,14 +37,14 @@ We support **13 state-of-the-art attacks**, faithfully re-implemented from their
 | :--- | :--- | :--- | :--- |
 | **Baseline** | **Random** | - | Uniform random sampling from pool. |
 | **Active Learning** | **ActiveThief** | [Pal et al. (2020)](https://arxiv.org/abs/2002.05646) | Uncertainty, K-Center, and DFAL sampling. |
-| | **Blackbox Dissector** | [Wang et al. (2021)](https://arxiv.org/abs/2105.13733) | Grad-CAM based erasing & selection. |
+| | **Blackbox Dissector** | [Wang et al. (2021)](https://arxiv.org/abs/2105.00623) | Grad-CAM based erasing & selection. |
 | | **CloudLeak** | [Yu et al. (2020)](https://ndss-symposium.org/ndss-paper/cloudleak-large-scale-deep-learning-models-stealing-publicly-available-images/) | Adversarial example generation (FeatureFool). |
-| | **InverseNet** | [He et al. (2021)](https://arxiv.org/abs/2104.04324) | Inversion-based sample recovery. |
-| | **SwiftThief** | [Miao et al. (2024)](https://arxiv.org/abs/2405.15286) | Contrastive learning (SimSiam) + Active selection. |
+| | **InverseNet** | [Gong et al. (2021)](https://www.ijcai.org/proceedings/2021/336) | Inversion-based sample recovery. |
+| | **SwiftThief** | [Lee et al. (2024)](https://www.ijcai.org/proceedings/2024/47) | Contrastive learning (SimSiam) + Active selection. |
 | **Data-Free / Generative** | **DFME** | [Truong et al. (2021)](https://arxiv.org/abs/2010.12758) | GAN-based query synthesis (Min-Max game). |
 | | **DFMS** | [Sanyal et al. (2022)](https://arxiv.org/abs/2205.12760) | Diverse query synthesis with entropy maximization. |
 | | **MAZE** | [Kariyappa et al. (2021)](https://arxiv.org/abs/2005.03161) | Zeroth-order gradient estimation. |
-| | **ES-Attack** | [Zhang et al. (2022)](https://arxiv.org/abs/2209.11797) | Evolutionary strategy for query synthesis. |
+| | **ES-Attack** | [Yuan et al. (2022)](https://arxiv.org/abs/2009.09560) | Evolutionary strategy for query synthesis. |
 | | **GAME** | [Zhang et al. (2023)](https://arxiv.org/abs/2301.12759) | Adaptive category selection & GAN training. |
 | **Hybrid / Other** | **KnockoffNets** | [Orekondy et al. (2019)](https://arxiv.org/abs/1812.02766) | Reinforcement learning (Bandit) for class selection. |
 | | **CopycatCNN** | [Correia-Silva et al. (2018)](https://arxiv.org/abs/1806.05476) | Large-scale offline augmentation of natural data. |

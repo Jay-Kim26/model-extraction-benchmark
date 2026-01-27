@@ -37,14 +37,14 @@
 | :--- | :--- | :--- | :--- |
 | **베이스라인** | **Random** | - | 후보 풀(Pool)에서의 균등 무작위 샘플링. |
 | **능동 학습 (Active Learning)** | **ActiveThief** | [Pal et al. (2020)](https://arxiv.org/abs/2002.05646) | 불확실성(Uncertainty), K-Center, DFAL 샘플링 전략. |
-| | **Blackbox Dissector** | [Wang et al. (2021)](https://arxiv.org/abs/2105.13733) | Grad-CAM 기반 중요 영역 삭제 및 샘플 선택. |
+| | **Blackbox Dissector** | [Wang et al. (2021)](https://arxiv.org/abs/2105.00623) | Grad-CAM 기반 중요 영역 삭제 및 샘플 선택. |
 | | **CloudLeak** | [Yu et al. (2020)](https://ndss-symposium.org/ndss-paper/cloudleak-large-scale-deep-learning-models-stealing-publicly-available-images/) | 적대적 예제(Adversarial Example) 생성 (FeatureFool). |
-| | **InverseNet** | [He et al. (2021)](https://arxiv.org/abs/2104.04324) | 역변환(Inversion) 기반 샘플 복원. |
-| | **SwiftThief** | [Miao et al. (2024)](https://arxiv.org/abs/2405.15286) | 대조 학습(Contrastive Learning, SimSiam) + 능동 선택. |
+| | **InverseNet** | [Gong et al. (2021)](https://www.ijcai.org/proceedings/2021/336) | 역변환(Inversion) 기반 샘플 복원. |
+| | **SwiftThief** | [Lee et al. (2024)](https://www.ijcai.org/proceedings/2024/47) | 대조 학습(Contrastive Learning, SimSiam) + 능동 선택. |
 | **데이터 프리 / 생성형 (Generative)** | **DFME** | [Truong et al. (2021)](https://arxiv.org/abs/2010.12758) | GAN 기반 쿼리 합성 (Min-Max 게임). |
 | | **DFMS** | [Sanyal et al. (2022)](https://arxiv.org/abs/2205.12760) | 엔트로피 최대화를 통한 다양한 쿼리 합성. |
 | | **MAZE** | [Kariyappa et al. (2021)](https://arxiv.org/abs/2005.03161) | Zeroth-order 기울기 추정 (Gradient Estimation). |
-| | **ES-Attack** | [Zhang et al. (2022)](https://arxiv.org/abs/2209.11797) | 진화 전략(Evolutionary Strategy)을 통한 쿼리 합성. |
+| | **ES-Attack** | [Yuan et al. (2022)](https://arxiv.org/abs/2009.09560) | 진화 전략(Evolutionary Strategy)을 통한 쿼리 합성. |
 | | **GAME** | [Zhang et al. (2023)](https://arxiv.org/abs/2301.12759) | 적응형 카테고리 선택 및 GAN 학습. |
 | **하이브리드 / 기타** | **KnockoffNets** | [Orekondy et al. (2019)](https://arxiv.org/abs/1812.02766) | 강화학습(Bandit)을 이용한 클래스 선택. |
 | | **CopycatCNN** | [Correia-Silva et al. (2018)](https://arxiv.org/abs/1806.05476) | 자연 이미지의 대규모 오프라인 증강(Augmentation). |
