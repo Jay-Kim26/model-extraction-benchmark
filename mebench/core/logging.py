@@ -30,7 +30,33 @@ class ArtifactLogger:
         }
 
         self.metrics_rows: List[Dict[str, Any]] = []
+        self.history_rows: List[Dict[str, Any]] = []  # New: Time-series history
         self.checkpoint_metrics: Dict[int, Dict[str, Any]] = {}
+
+    def log_history(self, step: int, metrics: Dict[str, float]) -> None:
+        """Log time-series metrics (e.g., loss, val_f1) at a specific step.
+        
+        Args:
+            step: Current query count or iteration
+            metrics: Dictionary of metric names and values
+        """
+        row = {"step": step, "timestamp": datetime.now().isoformat(), **metrics}
+        self.history_rows.append(row)
+        
+        # Flush to disk immediately for real-time monitoring
+        self._append_csv("metrics_history.csv", row)
+
+    def _append_csv(self, filename: str, row: Dict[str, Any]) -> None:
+        """Append a single row to a CSV file."""
+        file_path = self.run_dir / filename
+        file_exists = file_path.exists()
+        
+        fieldnames = list(row.keys())
+        with open(file_path, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow(row)
 
     def set_run_metadata(self, config: Dict[str, Any]) -> None:
         """Set run metadata from config.
