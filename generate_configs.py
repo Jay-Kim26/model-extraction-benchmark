@@ -125,8 +125,8 @@ def generate_configs():
                         "patience": 100
                     },
                     "budget": {
-                        "max_budget": 1000,
-                        "checkpoints": [1000]
+                        "max_budget": 20000,
+                        "checkpoints": [1000, 10000, 20000]
                     },
                     "cache": {
                         "enabled": True,
