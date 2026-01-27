@@ -253,8 +253,9 @@ class CloudLeak(BaseAttack):
         total_budget = int(state.metadata.get("max_budget", 10000))
         self.round_size = max(1, total_budget // self.num_rounds)
         
-        # Missing attribute restored
-        self.initial_pool_size = int(config.get("initial_pool_size", 1000))
+        # Missing attribute restored (Paper implies ~20% or min samples per class)
+        # We align with ActiveThief benchmark standard: 10% of total budget
+        self.initial_pool_size = int(config.get("initial_pool_size", max(1, int(0.1 * total_budget))))
         
         # Training hyperparameters
         self.batch_size = int(config.get("batch_size", 64))
