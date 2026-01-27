@@ -42,13 +42,17 @@ class ActiveThief(BaseAttack):
         """
         super().__init__(config, state)
 
-        # Hyperparameters (from AGENTS.md)
+        # Hyperparameters (from papers/activethief.pdf)
         self.strategy = config.get("strategy", "dfal_k_center")  # uncertainty, k_center, dfal, dfal_k_center
-        default_seed = config.get("initial_seed_size")
-        if default_seed is None:
-            max_budget = state.metadata.get("max_budget", 1000)
-            default_seed = max(1, int(0.1 * max_budget))
-        self.initial_seed_size = int(default_seed)
+        self.num_rounds = int(config.get("num_rounds", 10))
+        
+        max_budget = state.metadata.get("max_budget", 1000)
+        # 10% initial seed per paper
+        self.initial_seed_size = int(config.get("initial_seed_size", max(1, int(0.1 * max_budget))))
+        
+        # Iteration step size (budget / rounds)
+        self.step_size = max(1, max_budget // self.num_rounds)
+        
         self.batch_size = config.get("batch_size", 150)
         self.max_epochs = config.get("max_epochs", 1000)
         self.patience = config.get("patience", 100)
@@ -426,10 +430,9 @@ class ActiveThief(BaseAttack):
         state.attack_state["query_data_x"].append(x_batch.cpu())
         state.attack_state["query_data_y"].append(y_batch.cpu())
 
-        # Train substitute periodically for Track B evaluation
-        # Every 10% of accumulated data, retrain
+        # Train substitute periodically based on round step size
         labeled_count = len(state.attack_state["labeled_indices"])
-        if labeled_count % 100 == 0 and labeled_count > 0:
+        if labeled_count % self.step_size == 0 and labeled_count > 0:
             self.train_substitute(state)
 
     def train_substitute(self, state: BenchmarkState) -> None:

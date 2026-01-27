@@ -168,8 +168,9 @@ def run_experiment(
         print(f"\nStarting query collection (max budget: {max_budget})")
 
         while state.query_count < max_budget:
-            # Determine query batch size
-            step_size = min(100, max_budget - state.query_count)
+            # Determine query batch size (default to 1000 or remaining budget)
+            # Attacks can suggest larger steps for efficiency.
+            step_size = min(1000, max_budget - state.query_count)
 
             # Propose queries
             query_batch = attack.propose(step_size, state)
