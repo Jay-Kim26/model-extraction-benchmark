@@ -1,0 +1,87 @@
+"""Test contract validation (fail-fast on invalid configs)."""
+
+import pytest
+from mebench.core.validate import validate_config
+
+
+def test_dfme_requires_data_free():
+    """DFME requires data_free mode."""
+    config = {
+        "attack": {"name": "dfme", "output_mode": "soft_prob"},
+        "dataset": {"data_mode": "surrogate", "seed_name": "MNIST"},  # Invalid for DFME
+        "victim": {"output_mode": "soft_prob", "temperature": 1.0},
+        "budget": {"max_budget": 1000000, "checkpoints": [1000, 10000]},
+    }
+
+    with pytest.raises(ValueError, match="DFME requires data_free mode"):
+        validate_config(config)
+
+
+def test_temperature_must_be_1_for_default_oracle():
+    """Default oracle requires T=1.0 in v1.0."""
+    config = {
+        "attack": {"name": "random", "output_mode": "soft_prob"},
+        "dataset": {"data_mode": "seed", "seed_name": "MNIST"},
+        "victim": {"output_mode": "soft_prob", "temperature": 2.0},  # Invalid
+        "budget": {"max_budget": 1000000, "checkpoints": [1000, 10000]},
+    }
+
+    with pytest.raises(ValueError, match="Default oracle requires T=1.0 in v1.0"):
+        validate_config(config)
+
+
+def test_output_mode_mismatch():
+    """Victim and attack output modes must match."""
+    config = {
+        "attack": {"name": "random", "output_mode": "hard_top1"},
+        "dataset": {"data_mode": "seed", "seed_name": "MNIST"},
+        "victim": {"output_mode": "soft_prob"},  # Mismatch
+        "temperature": 1.0,
+        "budget": {"max_budget": 1000000, "checkpoints": [1000, 10000]},
+    }
+
+    with pytest.raises(ValueError, match="Mode mismatch"):
+        validate_config(config)
+
+
+def test_checkpoint_exceeds_max_budget():
+    """Checkpoints cannot exceed max_budget."""
+    config = {
+        "attack": {"name": "random", "output_mode": "soft_prob"},
+        "dataset": {"data_mode": "seed", "seed_name": "MNIST"},
+        "victim": {"output_mode": "soft_prob", "temperature": 1.0},
+        "budget": {"max_budget": 1000, "checkpoints": [1000, 10000]},  # 10000 > 1000
+    }
+
+    with pytest.raises(ValueError, match="Checkpoint exceeds max_budget"):
+        validate_config(config)
+
+
+def test_checkpoints_must_be_increasing():
+    """Checkpoints must be in increasing order."""
+    config = {
+        "attack": {"name": "random", "output_mode": "soft_prob"},
+        "dataset": {"data_mode": "seed", "seed_name": "MNIST"},
+        "victim": {"output_mode": "soft_prob", "temperature": 1.0},
+        "budget": {"max_budget": 1000000, "checkpoints": [10000, 1000]},  # Not increasing
+    }
+
+    with pytest.raises(ValueError, match="Checkpoints must be increasing"):
+        validate_config(config)
+
+
+def test_valid_config_passes():
+    """Valid configuration should not raise errors."""
+    config = {
+        "attack": {"name": "random", "output_mode": "soft_prob"},
+        "dataset": {"data_mode": "seed", "seed_name": "MNIST"},
+        "victim": {"output_mode": "soft_prob", "temperature": 1.0},
+        "budget": {"max_budget": 1000000, "checkpoints": [1000, 10000, 100000]},
+    }
+
+    # Should not raise
+    validate_config(config)
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
