@@ -253,6 +253,9 @@ class CloudLeak(BaseAttack):
         total_budget = int(state.metadata.get("max_budget", 10000))
         self.round_size = max(1, total_budget // self.num_rounds)
         
+        # Missing attribute restored
+        self.initial_pool_size = int(config.get("initial_pool_size", 1000))
+        
         # Training hyperparameters
         self.batch_size = int(config.get("batch_size", 64))
         self.lr = float(config.get("lr", 0.01))
