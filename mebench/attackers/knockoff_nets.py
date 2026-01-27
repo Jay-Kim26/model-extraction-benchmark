@@ -87,7 +87,8 @@ class KnockoffNets(BaseAttack):
         self.class_to_indices = {i: [] for i in range(self.num_classes)}
         for idx in range(len(self.pool_dataset)):
             _, label = self.pool_dataset[idx]
-            class_id = int(label)
+            # Map surrogate classes to victim classes via modulo if needed
+            class_id = int(label) % self.num_classes
             if class_id not in self.class_to_indices:
                 self.class_to_indices[class_id] = []
             self.class_to_indices[class_id].append(idx)
@@ -207,7 +208,7 @@ class KnockoffNets(BaseAttack):
         coarse_probs = torch.softmax(coarse_weights, dim=0).cpu().numpy()
         coarse_id = int(np.random.choice(list(range(len(coarse_probs))), p=coarse_probs))
 
-        class_ids = coarse_to_classes.get(coarse_id, [])
+        class_ids = [c for c in coarse_to_classes.get(coarse_id, []) if c < self.num_classes]
         if not class_ids:
             probs = torch.softmax(class_weights, dim=0).cpu().numpy()
             return int(np.random.choice(list(range(len(probs))), p=probs))
@@ -398,7 +399,10 @@ class KnockoffNets(BaseAttack):
 
         model.train()
         victim_config = state.metadata.get("victim_config", {})
-        normalization = victim_config.get("normalization", {"mean": [0.5], "std": [0.5]})
+        normalization = victim_config.get("normalization")
+        if normalization is None:
+            normalization = {"mean": [0.0], "std": [1.0]}
+            
         norm_mean = torch.tensor(normalization["mean"]).view(1, -1, 1, 1).to(device)
         norm_std = torch.tensor(normalization["std"]).view(1, -1, 1, 1).to(device)
         

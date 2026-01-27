@@ -109,6 +109,27 @@ class QueryStorage(Dataset):
 
         print(f"Loaded {self.count} queries from {self.cache_dir}")
 
+    def get_dataloader(
+        self, batch_size: int = 128, shuffle: bool = True, num_workers: int = 0
+    ) -> torch.utils.data.DataLoader:
+        """Create DataLoader for stored queries.
+
+        Args:
+            batch_size: Batch size
+            shuffle: Whether to shuffle
+            num_workers: Number of workers
+
+        Returns:
+            DataLoader
+        """
+        if self.queries is None:
+            # Return empty loader if no data
+            return torch.utils.data.DataLoader([])
+            
+        return torch.utils.data.DataLoader(
+            self, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers
+        )
+
     def cleanup(self) -> None:
         """Remove all storage files."""
         if self.cache_dir.exists():

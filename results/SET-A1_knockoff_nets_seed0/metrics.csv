@@ -1,0 +1,3 @@
+seed,checkpoint_B,track,acc_gt,agreement,kl_mean,l1_mean,attack,data_mode,output_mode,victim_id,substitute_arch
+0,1000,track_a,0.2824,0.2841,1.9296816528320313,0.1579525410079956,knockoff_nets,surrogate,soft_prob,mnist_lenet_mnist,lenet_mnist
+0,10000,track_a,0.8685,0.8726,0.3730643855571747,0.04034769846916199,knockoff_nets,surrogate,soft_prob,mnist_lenet_mnist,lenet_mnist

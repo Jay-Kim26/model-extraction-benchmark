@@ -196,6 +196,8 @@ def run_experiment(
 
                     # Log results
                     for track in ["track_a", "track_b"]:
+                        if track not in results:
+                            continue
                         logger.log_checkpoint(
                             seed=seed,
                             checkpoint=checkpoint,

@@ -60,25 +60,25 @@ def aggregate_matrix(root_dir="runs"):
     stats.columns = [f"{col[0]}_{col[1]}" if col[1] else col[0] for col in stats.columns]
     
     # 6. Format as Mean ± Std
-    stats["Accuracy (µ±σ)"] = stats.apply(lambda x: f"{x['Accuracy_mean']:.4f} ± {x['Accuracy_std']:.4f}" if not pd.isna(x['Accuracy_std']) else f"{x['Accuracy_mean']:.4f}", axis=1)
-    stats["Agreement (µ±σ)"] = stats.apply(lambda x: f"{x['Agreement_mean']:.4f} ± {x['Agreement_std']:.4f}" if not pd.isna(x['Agreement_std']) else f"{x['Agreement_mean']:.4f}", axis=1)
+    stats["Accuracy (mean+std)"] = stats.apply(lambda x: f"{x['Accuracy_mean']:.4f} + {x['Accuracy_std']:.4f}" if not pd.isna(x['Accuracy_std']) else f"{x['Accuracy_mean']:.4f}", axis=1)
+    stats["Agreement (mean+std)"] = stats.apply(lambda x: f"{x['Agreement_mean']:.4f} + {x['Agreement_std']:.4f}" if not pd.isna(x['Agreement_std']) else f"{x['Agreement_mean']:.4f}", axis=1)
     
     # 7. Pivot for Paper Table
     # Row: Attack, Column: Set
-    pivot_acc = stats.pivot(index="Attack", columns="Set", values="Accuracy (µ±σ)")
+    pivot_acc = stats.pivot(index="Attack", columns="Set", values="Accuracy (mean+std)")
     
-    print("\n### Extraction Accuracy (µ±σ) across Experimental Sets")
+    print("\n### Extraction Accuracy (mean+std) across Experimental Sets")
     print(pivot_acc.to_markdown())
     
-    pivot_acc.to_csv("matrix_results_accuracy.csv")
+    pivot_acc.to_csv("matrix_results_accuracy.csv", encoding='utf-8')
     
     # Generate LaTeX
     latex_acc = pivot_acc.to_latex(
-        caption="Model Extraction Accuracy (mean $\pm$ std) across different Victim-Surrogate setups (10k Budget).",
+        caption="Model Extraction Accuracy (mean $\\pm$ std) across different Victim-Surrogate setups (10k Budget).",
         label="tab:matrix_results",
         escape=False
     )
-    with open("matrix_results.tex", "w") as f:
+    with open("matrix_results.tex", "w", encoding='utf-8') as f:
         f.write(latex_acc)
     
     print("\nArtifacts saved: matrix_results_accuracy.csv, matrix_results.tex")

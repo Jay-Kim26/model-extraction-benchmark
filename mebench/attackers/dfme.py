@@ -271,7 +271,7 @@ class DFME(BaseAttack):
 
         # Convert oracle output to logits if needed
         if oracle_output.kind == "soft_prob":
-            log_probs = torch.log(oracle_output.y + 1e-6)
+            log_probs = torch.log(oracle_output.y.to(device) + 1e-6)
             victim_logits = log_probs - log_probs.mean(dim=1, keepdim=True)
         else:
             num_classes = int(
@@ -280,7 +280,7 @@ class DFME(BaseAttack):
                 or self.state.metadata.get("dataset_config", {}).get("num_classes", 10)
             )
             victim_logits = torch.zeros(oracle_output.y.shape[0], num_classes).to(device)
-            victim_logits.scatter_(1, oracle_output.y.unsqueeze(1), 1.0)
+            victim_logits.scatter_(1, oracle_output.y.to(device).unsqueeze(1), 1.0)
 
         # Match victim outputs to our unpacking.
         victim_base = []
@@ -337,7 +337,10 @@ class DFME(BaseAttack):
 
         # S-step: Minimize disagreement using base queries
         victim_config = state.metadata.get("victim_config", {})
-        normalization = victim_config.get("normalization", {"mean": [0.5], "std": [0.5]})
+        normalization = victim_config.get("normalization")
+        if normalization is None:
+            normalization = {"mean": [0.0], "std": [1.0]}
+            
         norm_mean = torch.tensor(normalization["mean"]).view(1, -1, 1, 1).to(device)
         norm_std = torch.tensor(normalization["std"]).view(1, -1, 1, 1).to(device)
 

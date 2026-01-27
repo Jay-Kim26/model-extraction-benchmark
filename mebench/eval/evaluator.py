@@ -11,32 +11,38 @@ from mebench.eval.metrics import evaluate_substitute
 class Evaluator:
     """Evaluates benchmark state using Track A protocol."""
 
-    def __init__(self, config: dict, device: str):
+    def __init__(self, config: dict, state: Any, query_storage: Any):
         """Initialize evaluator.
 
         Args:
             config: Full experiment configuration
-            device: Device to use for evaluation
+            state: BenchmarkState object
+            query_storage: QueryStorage object
         """
         self.config = config
-        self.device = device
+        self.state = state
+        self.query_storage = query_storage
+        self.device = state.metadata["device"]
 
-    def evaluate_checkpoint(
+    def evaluate(
         self,
-        checkpoint_budget: int,
-        query_loader: DataLoader,
         victim: nn.Module,
+        test_loader: DataLoader,
+        checkpoint_budget: int,
     ) -> Dict[str, Dict[str, float]]:
         """Perform Track A evaluation.
 
         Args:
-            checkpoint_budget: Current query budget
-            query_loader: DataLoader for collected queries
             victim: The victim model
+            test_loader: DataLoader for test set
+            checkpoint_budget: Current query budget
 
         Returns:
             Dictionary with results (track_a)
         """
+        # Load query data
+        query_loader = self.query_storage.get_dataloader(batch_size=128)
+
         # 1. Setup substitute
         sub_config = self.config["substitute"]
         num_classes = int(self.config["victim"]["num_classes"])
@@ -55,10 +61,6 @@ class Evaluator:
         self._train_track_a(substitute, query_loader, checkpoint_budget)
 
         # 3. Evaluate
-        test_dataset_name = self.config["dataset"]["name"]
-        from mebench.data.loaders import get_test_dataloader
-        test_loader = get_test_dataloader(test_dataset_name, batch_size=128)
-
         output_mode = self.config["victim"]["output_mode"]
         temperature = self.config["victim"]["temperature"]
 

@@ -7,7 +7,7 @@ from mebench.core.state import BenchmarkState
 from mebench.data.loaders import create_dataloader
 
 
-class RandomAttack(BaseAttack):
+class RandomBaseline(BaseAttack):
     """Attack that randomly samples from surrogate or seed pool."""
 
     def __init__(self, config: dict, state: BenchmarkState):

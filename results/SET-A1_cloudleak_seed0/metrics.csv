@@ -1,0 +1,3 @@
+seed,checkpoint_B,track,acc_gt,agreement,kl_mean,l1_mean,attack,data_mode,output_mode,victim_id,substitute_arch
+0,1000,track_a,0.3143,0.3159,1.9433672498703003,0.15877198280334473,cloudleak,surrogate,soft_prob,mnist_lenet_mnist,lenet_mnist
+0,10000,track_a,0.8547,0.857,0.4724201338291168,0.04352742241382599,cloudleak,surrogate,soft_prob,mnist_lenet_mnist,lenet_mnist
