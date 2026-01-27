@@ -152,15 +152,16 @@ class FeatureFool:
             
             # Optimization: Pre-extract phi_t and phi_s outside closure (already done)
             
+        # Triplet loss
             phi_adv = self._extract_features(x_adv.unsqueeze(0)).view(-1)
-            
-            # Triplet loss
             dist_t = torch.norm(phi_adv - phi_t_flat, p=2)
             dist_s = torch.norm(phi_adv - phi_s_flat, p=2)
-            triplet = F.relu(dist_t - dist_s + self.margin_m)
             
-            # Visual constraint
-            visual_loss = torch.norm(delta, p=2)
+            # Paper Eq. 10: minimize ||delta||^2 + lambda * max(0, d(x_adv, x_t) - d(x_adv, x_s) + M)
+            triplet = torch.clamp(dist_t - dist_s + self.margin_m, min=0.0)
+            
+            # Visual constraint: Squared L2 distance (||delta||^2)
+            visual_loss = torch.sum(delta ** 2)
             
             loss = visual_loss + self.lambda_adv * triplet
             loss.backward()
@@ -222,7 +223,9 @@ class CloudLeak(BaseAttack):
         # Round-based hyperparameters (paper ~1000 per round)
         self.num_rounds = int(config.get("num_rounds", 10))
         total_budget = int(state.metadata.get("max_budget", 10000))
+        # FIXED: round_size calculation was wrong (len(list) vs count)
         self.round_size = max(1, total_budget // self.num_rounds)
+        print(f"DEBUG: CloudLeak initialized. total_budget={total_budget}, round_size={self.round_size}")
         
         # Missing attribute restored (Paper implies ~20% or min samples per class)
         # We align with ActiveThief benchmark standard: 10% of total budget
@@ -350,14 +353,21 @@ class CloudLeak(BaseAttack):
                 config=self.config,
             )
 
-        # Generate candidates and select by uncertainty under the substitute.
+        # Generate adversarial synthesis candidates (paper uses Source-Target pair)
         n_cand = max(int(k), int(k) * max(1, int(self.uncertainty_candidates)))
         scored = []
         substitute.eval()
-        for _ in range(n_cand):
-            # Select random source and target from pool
-            source_idx = np.random.choice(pool_indices)
-            target_idx = np.random.choice([idx for idx in pool_indices if idx != source_idx])
+        
+        # Pre-select source and target indices for efficiency
+        possible_sources = np.random.choice(pool_indices, n_cand, replace=True)
+        possible_targets = np.random.choice(pool_indices, n_cand, replace=True)
+        
+        print(f"\nGenerating {n_cand} adversarial queries via FeatureFool...")
+        for i in range(n_cand):
+            source_idx = possible_sources[i]
+            target_idx = possible_targets[i]
+            if source_idx == target_idx:
+                target_idx = np.random.choice([idx for idx in pool_indices if idx != source_idx])
 
             source_img, source_label = self.pool_dataset[source_idx]
             target_img, _ = self.pool_dataset[target_idx]
@@ -373,7 +383,9 @@ class CloudLeak(BaseAttack):
                 probs = F.softmax(substitute(x_adv.unsqueeze(0).to(device)), dim=1).squeeze(0)
                 entropy = -torch.sum(probs * torch.log(probs + 1e-10)).item()
 
-            scored.append((entropy, x_adv, (source_idx, target_idx)))
+            scored.append((entropy, x_adv, (int(source_idx), int(target_idx))))
+            if (i + 1) % max(1, n_cand // 10) == 0:
+                print(f"  Progress: {i + 1}/{n_cand}")
 
         scored.sort(key=lambda t: t[0], reverse=True)
         top = scored[:k]
@@ -453,7 +465,8 @@ class CloudLeak(BaseAttack):
             state.attack_state["synthetic_indices"].extend(indices)
 
         # Train substitute at the end of each round (paper protocol)
-        query_count = len(state.attack_state["query_data_x"])
+        query_count = sum(len(x) for x in state.attack_state["query_data_x"])
+        # print(f"DEBUG: CloudLeak observe. query_count={query_count}, round_size={self.round_size}")
         if query_count % self.round_size == 0 and query_count > 0:
             self.train_substitute(state)
 
