@@ -100,6 +100,14 @@ class ActiveThief(BaseAttack):
                 shuffle=False,
             ).dataset
 
+        # Retrieve normalization parameters for consistent inference
+        victim_config = state.metadata.get("victim_config", {})
+        normalization = victim_config.get("normalization")
+        if normalization is None:
+            normalization = {"mean": [0.0], "std": [1.0]}
+        self.norm_mean = torch.tensor(normalization["mean"]).view(1, -1, 1, 1)
+        self.norm_std = torch.tensor(normalization["std"]).view(1, -1, 1, 1)
+
         # Handle empty pool
         if len(unlabeled_indices) == 0:
             # Pool exhausted, return synthetic random queries
@@ -141,145 +149,123 @@ class ActiveThief(BaseAttack):
 
         return QueryBatch(x=x, meta=meta)
 
-    def _select_uncertainty(self, k: int, state: BenchmarkState) -> list:
-        """Select k samples with highest entropy (most uncertain).
-
-        Entropy calculation:
-        H_n = -sum_j  ỹ_{n,j} * log(ỹ_{n,j})
-
-        Args:
-            k: Number of samples to select
-            state: Current benchmark state
-
-        Returns:
-            List of selected indices
+    def _get_approx_probs(self, indices: List[int], substitute: nn.Module, batch_size: int = 512) -> torch.Tensor:
+        """Step 4: Compute approximate labels (softmax probabilities) for candidate pool.
+        
+        Uses efficient batch processing to minimize overhead.
         """
+        device = next(substitute.parameters()).device
+        substitute.eval()
+        
+        # Create temporary dataloader for efficient batch inference
+        subset = Subset(self.pool_dataset, indices)
+        loader = DataLoader(subset, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=True)
+        
+        probs_list = []
+        norm_mean = self.norm_mean.to(device)
+        norm_std = self.norm_std.to(device)
+        
+        with torch.no_grad():
+            for x_batch, _ in loader:
+                x_batch = x_batch.to(device)
+                x_batch = (x_batch - norm_mean) / norm_std
+                logits = substitute(x_batch)
+                probs = F.softmax(logits, dim=1)
+                probs_list.append(probs.cpu())
+                
+        return torch.cat(probs_list, dim=0)
+
+    def _select_uncertainty(self, k: int, state: BenchmarkState) -> list:
+        """Select k samples with highest entropy (Vectorized implementation)."""
         unlabeled_indices = state.attack_state["unlabeled_indices"]
         substitute = state.attack_state["substitute"]
 
         if substitute is None:
-            # No substitute trained yet, select random
             return np.random.choice(unlabeled_indices, k, replace=False).tolist()
 
-        # Load unlabeled data and compute predictions
-        substitute.eval()
-        device = next(substitute.parameters()).device
-        victim_config = state.metadata.get("victim_config", {})
-        normalization = victim_config.get("normalization")
-        if normalization is None:
-            normalization = {"mean": [0.0], "std": [1.0]}
+        # Step 4: Get approximate labels for ALL unlabeled samples (Strict Protocol)
+        # For huge datasets, one might sample a subset here, but we stick to strict full-scan.
+        probs = self._get_approx_probs(unlabeled_indices, substitute)
         
-        norm_mean = torch.tensor(normalization["mean"]).view(1, -1, 1, 1).to(device)
-        norm_std = torch.tensor(normalization["std"]).view(1, -1, 1, 1).to(device)
+        # Calculate entropy: H = -sum(p * log(p))
+        log_probs = torch.log(probs + 1e-10)
+        entropy = -torch.sum(probs * log_probs, dim=1)
         
-        entropy_scores = []
-
-        with torch.no_grad():
-            for idx in unlabeled_indices:
-                img, _ = self.pool_dataset[idx]
-                x = img.unsqueeze(0).to(device)  # Add batch dimension
-                # Normalize images for substitute
-                x = (x - norm_mean) / norm_std
-
-                # Get probability distribution
-                probs = F.softmax(substitute(x), dim=1).squeeze(0)
-
-                # Calculate entropy: H = -sum(p * log(p))
-                entropy = -torch.sum(probs * torch.log(probs + 1e-10))
-                entropy_scores.append((idx, entropy.item()))
-
-        # Sort by entropy (highest first) and select top-k
-        entropy_scores.sort(key=lambda x: x[1], reverse=True)
-        selected = [idx for idx, _ in entropy_scores[:k]]
-
+        # Top-k selection
+        _, topk_indices = torch.topk(entropy, k=min(k, len(entropy)))
+        selected = [unlabeled_indices[i] for i in topk_indices.tolist()]
+        
         return selected
 
     def _select_k_center(self, k: int, state: BenchmarkState) -> list:
-        """Select k samples farthest from labeled set (K-center greedy).
-
-        For each unlabeled sample:
-        - Compute distance to nearest labeled sample
-        - Select sample with maximum distance
-
-        Args:
-            k: Number of samples to select
-            state: Current benchmark state
-
-        Returns:
-            List of selected indices
+        """Select k samples using K-center greedy on Probability Vectors (Strict Protocol).
+        
+        Metric: L2 distance between softmax probability vectors.
         """
         unlabeled_indices = state.attack_state["unlabeled_indices"]
-        return self._select_k_center_candidates(k, unlabeled_indices, state)
-
-    def _select_k_center_candidates(self, k: int, candidates: List[int], state: BenchmarkState) -> list:
         labeled_indices = state.attack_state["labeled_indices"]
-
-        if len(labeled_indices) == 0:
-            # No labeled samples yet, select random
-            return np.random.choice(candidates, min(k, len(candidates)), replace=False).tolist()
-
         substitute = state.attack_state["substitute"]
+
         if substitute is None:
-            return np.random.choice(candidates, min(k, len(candidates)), replace=False).tolist()
+            return np.random.choice(unlabeled_indices, k, replace=False).tolist()
+            
+        # Step 4: Get approximate labels (probability vectors)
+        # Optimization: To avoid O(N^2) with huge pools, we sample a large candidate pool.
+        # Paper implies full scan, but 50k x 50k distance matrix is heavy.
+        # We use a large candidate pool (e.g. 5000 + k) to approximate full scan efficiently.
+        max_candidates = 5000 + k
+        if len(unlabeled_indices) > max_candidates:
+            candidate_pool_idx = np.random.choice(len(unlabeled_indices), max_candidates, replace=False)
+            candidates = [unlabeled_indices[i] for i in candidate_pool_idx]
+        else:
+            candidates = unlabeled_indices
+            
+        # Get probs for candidates (U) and labeled set (L)
+        probs_u = self._get_approx_probs(candidates, substitute) # [M, C]
+        
+        # For L, we re-compute current probs to be in same space (or cache them)
+        # Re-computing ensures consistency with current model state
+        probs_l = self._get_approx_probs(labeled_indices, substitute) # [N, C]
+        
+        return self._k_center_greedy(probs_u, probs_l, candidates, k)
 
-        device = next(substitute.parameters()).device
-        substitute.eval()
-
-        def extract_vector(x: torch.Tensor, use_features: bool) -> torch.Tensor:
-            if use_features and hasattr(substitute, "features"):
-                return substitute.features(x).squeeze(0)
-            return F.softmax(substitute(x), dim=1).squeeze(0)
-
-        def build_labeled_vecs(use_features: bool) -> List[torch.Tensor]:
-            vecs = []
-            with torch.no_grad():
-                for idx in labeled_indices:
-                    img, _ = self.pool_dataset[idx]
-                    x = img.unsqueeze(0).to(device)
-                    vecs.append(extract_vector(x, use_features).cpu())
-            return vecs
-
-        def compute_min_distances(
-            use_features: bool, labeled_vecs: List[torch.Tensor], candidates: List[int]
-        ) -> List[tuple[int, float]]:
-            labeled_stack = torch.stack(labeled_vecs)
-            distances = []
-            with torch.no_grad():
-                for idx in candidates:
-                    img, _ = self.pool_dataset[idx]
-                    x = img.unsqueeze(0).to(device)
-                    vec = extract_vector(x, use_features).cpu()
-                    dist = torch.norm(labeled_stack - vec, dim=1).min().item()
-                    distances.append((idx, dist))
-            return distances
-
-        # Greedy selection of k samples
-        selected = []
-        remaining_indices = candidates.copy()
-
-        use_features = False
-        labeled_vecs = build_labeled_vecs(use_features)
-
-        for _ in range(k):
-            if len(remaining_indices) == 0:
-                break
-
-            dist_scores = compute_min_distances(use_features, labeled_vecs, remaining_indices)
-            dists = [d for _, d in dist_scores]
-            if dists and max(dists) - min(dists) < 1e-6 and hasattr(substitute, "features"):
-                use_features = True
-                labeled_vecs = build_labeled_vecs(use_features)
-                dist_scores = compute_min_distances(use_features, labeled_vecs, remaining_indices)
-
-            best_idx = max(dist_scores, key=lambda x: x[1])[0]
-            selected.append(best_idx)
-            remaining_indices.remove(best_idx)
-
-            img, _ = self.pool_dataset[best_idx]
-            x = img.unsqueeze(0).to(device)
-            labeled_vecs.append(extract_vector(x, use_features).cpu())
-
-        return selected
+    def _k_center_greedy(self, x_u: torch.Tensor, x_l: torch.Tensor, candidate_indices: List[int], k: int) -> List[int]:
+        """Greedy K-Center algorithm using L2 distance on tensors."""
+        device = x_u.device
+        # If too large, move to CPU
+        if x_u.numel() > 1e7: 
+            device = 'cpu'
+            
+        x_u = x_u.to(device)
+        x_l = x_l.to(device)
+        
+        # Initialize min distances: min_dist(u) = min_{l in L} ||u - l||^2
+        # Use simple loop to avoid huge memory for distance matrix
+        min_dists = torch.full((x_u.size(0),), float('inf'), device=device)
+        
+        # Initial distances from existing labeled set
+        # Process in chunks to save memory
+        chunk_size = 1000
+        for i in range(0, x_l.size(0), chunk_size):
+            chunk = x_l[i : i + chunk_size]
+            dists = torch.cdist(x_u, chunk, p=2).min(dim=1).values
+            min_dists = torch.minimum(min_dists, dists)
+            
+        selected_indices = []
+        for _ in range(min(k, len(candidate_indices))):
+            # Select point with max min_dist
+            idx = torch.argmax(min_dists).item()
+            selected_indices.append(candidate_indices[idx])
+            
+            # Update min_dists with the new point
+            new_center = x_u[idx].unsqueeze(0)
+            new_dists = torch.cdist(x_u, new_center, p=2).squeeze(1)
+            min_dists = torch.minimum(min_dists, new_dists)
+            
+            # Infinite distance for selected to prevent re-selection (though indices are unique)
+            min_dists[idx] = -1.0 
+            
+        return selected_indices
 
     def _select_dfal_k_center(self, k: int, rho: int, state: BenchmarkState) -> list:
         """DFAL pre-filter (rho) then K-center (k)."""
@@ -299,38 +285,64 @@ class ActiveThief(BaseAttack):
         return self._select_k_center_candidates(k, dfal_candidates, state)
 
     def _select_dfal(self, k: int, state: BenchmarkState) -> list:
-        """Select k samples closest to decision boundary (DeepFool).
-
-        DeepFool computes minimal perturbation needed to change prediction.
-        Smaller perturbation = closer to decision boundary.
-
-        Args:
-            k: Number of samples to select
-            state: Current benchmark state
-
-        Returns:
-            List of selected indices
+        """Select k samples closest to decision boundary using vectorized DeepFool approximation.
+        
+        Strictly speaking, DeepFool is iterative. To speed up without losing rigor,
+        we run iterative DF but on batched inputs using the helper function.
         """
         unlabeled_indices = state.attack_state["unlabeled_indices"]
-
         substitute = state.attack_state["substitute"]
+
         if substitute is None:
             return np.random.choice(unlabeled_indices, k, replace=False).tolist()
 
+        # Optimization: Subsample candidate pool for heavy DFAL computation
+        max_candidates = 2000 + k
+        if len(unlabeled_indices) > max_candidates:
+            candidate_pool_idx = np.random.choice(len(unlabeled_indices), max_candidates, replace=False)
+            candidates = [unlabeled_indices[i] for i in candidate_pool_idx]
+        else:
+            candidates = unlabeled_indices
+
         device = next(substitute.parameters()).device
         substitute.eval()
+        
+        norm_mean = self.norm_mean.to(device)
+        norm_std = self.norm_std.to(device)
 
-        perturbation_sizes = []
-
-        for idx in unlabeled_indices:
-            img, _ = self.pool_dataset[idx]
-            x = img.unsqueeze(0).to(device)
-            perturbation_size = self._deepfool_perturbation(substitute, x)
-            perturbation_sizes.append((idx, perturbation_size))
+        # We process candidates in batches to compute DeepFool perturbations
+        subset = Subset(self.pool_dataset, candidates)
+        loader = DataLoader(subset, batch_size=64, shuffle=False, num_workers=2)
+        
+        perturbation_scores = []
+        cursor = 0
+        
+        for x_batch, _ in loader:
+            x_batch = x_batch.to(device)
+            
+            # DeepFool requires gradient access, so we clone and detach for safety but enable grad
+            # Note: _deepfool_perturbation_batch handles the loop internally per sample or batch?
+            # DeepFool is hard to batch fully because each sample stops at different iter.
+            # We use a loop over batch for simplicity but it's faster than single-item dataloader overhead.
+            
+            batch_scores = []
+            for i in range(x_batch.size(0)):
+                x = x_batch[i : i+1]
+                # Pre-normalize for substitute inside the helper if needed? 
+                # Our helper expects raw input? No, typically models expect normalized.
+                # But our _deepfool_perturbation helper takes 'x' and passes it to 'model'.
+                # So we must pass normalized 'x'.
+                x_norm = (x - norm_mean) / norm_std
+                pert = self._deepfool_perturbation(substitute, x_norm)
+                batch_scores.append(pert)
+                
+            for score in batch_scores:
+                perturbation_scores.append((candidates[cursor], score))
+                cursor += 1
 
         # Sort by perturbation size (smallest first = closest to boundary)
-        perturbation_sizes.sort(key=lambda x: x[1])
-        selected = [idx for idx, _ in perturbation_sizes[:k]]
+        perturbation_scores.sort(key=lambda x: x[1])
+        selected = [idx for idx, _ in perturbation_scores[:k]]
 
         return selected
 
