@@ -41,14 +41,14 @@
 | | **CloudLeak** | [Yu et al. (2020)](https://ndss-symposium.org/ndss-paper/cloudleak-large-scale-deep-learning-models-stealing-publicly-available-images/) | 적대적 예제(Adversarial Example) 생성 (FeatureFool). |
 | | **InverseNet** | [Gong et al. (2021)](https://www.ijcai.org/proceedings/2021/336) | 역변환(Inversion) 기반 샘플 복원. |
 | | **SwiftThief** | [Lee et al. (2024)](https://www.ijcai.org/proceedings/2024/47) | 대조 학습(Contrastive Learning, SimSiam) + 능동 선택. |
-| **데이터 프리 / 생성형 (Generative)** | **DFME** | [Truong et al. (2021)](https://arxiv.org/abs/2010.12758) | GAN 기반 쿼리 합성 (Min-Max 게임). |
-| | **DFMS** | [Sanyal et al. (2022)](https://arxiv.org/abs/2205.12760) | 엔트로피 최대화를 통한 다양한 쿼리 합성. |
+| **데이터 프리 / 생성형 (Generative)** | **DFME** | [Truong et al. (2021)](https://arxiv.org/abs/2011.14779) | GAN 기반 쿼리 합성 (Min-Max 게임). |
+| | **DFMS** | [Sanyal et al. (2022)](https://arxiv.org/abs/2204.11022) | 엔트로피 최대화를 통한 다양한 쿼리 합성. |
 | | **MAZE** | [Kariyappa et al. (2021)](https://arxiv.org/abs/2005.03161) | Zeroth-order 기울기 추정 (Gradient Estimation). |
 | | **ES-Attack** | [Yuan et al. (2022)](https://arxiv.org/abs/2009.09560) | 진화 전략(Evolutionary Strategy)을 통한 쿼리 합성. |
-| | **GAME** | [Zhang et al. (2023)](https://arxiv.org/abs/2301.12759) | 적응형 카테고리 선택 및 GAN 학습. |
+| | **GAME** | [Xie et al. (2022)](https://link.springer.com/chapter/10.1007/978-3-031-17140-6_28) | 적응형 카테고리 선택 및 GAN 학습. |
 | **하이브리드 / 기타** | **KnockoffNets** | [Orekondy et al. (2019)](https://arxiv.org/abs/1812.02766) | 강화학습(Bandit)을 이용한 클래스 선택. |
 | | **CopycatCNN** | [Correia-Silva et al. (2018)](https://arxiv.org/abs/1806.05476) | 자연 이미지의 대규모 오프라인 증강(Augmentation). |
-| | **Blackbox Ripper** | [Barbalau et al. (2020)](https://arxiv.org/abs/2003.04884) | 사전 학습된 GAN의 잠재 공간(Latent Space) 진화. |
+| | **Blackbox Ripper** | [Barbalau et al. (2020)](https://arxiv.org/abs/2010.11158) | 사전 학습된 GAN의 잠재 공간(Latent Space) 진화. |
 
 ---
 
