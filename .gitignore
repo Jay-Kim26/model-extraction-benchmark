@@ -35,6 +35,7 @@ coverage.xml
 # Project specific
 runs/
 data/
+configs/
 papers/*.pdf
 papers/*.txt
 !papers/README.md

@@ -20,6 +20,7 @@ class CopycatCNN(BaseAttack):
 
         self.batch_size = int(config.get("batch_size", 128))
         self.train_every = int(config.get("train_every", 1000))
+        self.train_checkpoints = config.get("train_checkpoints", [1000, 10000, 100000, 1000000])
         self.substitute_lr = float(config.get("substitute_lr", 0.01))
         self.substitute_momentum = float(config.get("substitute_momentum", 0.9))
         self.substitute_weight_decay = float(config.get("substitute_weight_decay", 5e-4))
@@ -95,7 +96,8 @@ class CopycatCNN(BaseAttack):
         state.attack_state["query_data_x"].append(query_batch.x.detach().cpu())
         state.attack_state["query_data_y"].append(labels.detach().cpu())
 
-        if state.query_count % self.train_every == 0 and state.query_count > 0:
+        # Train only at specified checkpoints
+        if state.query_count in self.train_checkpoints and state.query_count > 0:
             self._train_substitute(state)
 
     def _train_substitute(self, state: BenchmarkState) -> None:
@@ -243,7 +245,12 @@ class CopycatCNN(BaseAttack):
         norm_mean = torch.tensor(normalization["mean"]).view(1, -1, 1, 1).to(device)
         norm_std = torch.tensor(normalization["std"]).view(1, -1, 1, 1).to(device)
         
-        for _ in range(epochs):
+        for epoch in range(epochs):
+            # Apply step-down LR schedule as per paper
+            current_lr = self._get_current_lr(epoch, epochs)
+            for param_group in self.substitute_optimizer.param_groups:
+                param_group['lr'] = current_lr
+            
             for x_batch, y_batch in loader:
                 x_batch = x_batch.to(device)
                 # Normalize images for substitute
@@ -257,3 +264,15 @@ class CopycatCNN(BaseAttack):
                 self.substitute_optimizer.step()
 
         state.attack_state["substitute"] = self.substitute
+
+    def _get_current_lr(self, epoch: int, total_epochs: int) -> float:
+        """Apply step-down LR schedule as per CopycatCNN paper."""
+        base_lr = self.substitute_lr
+        
+        if epoch >= int(total_epochs * 0.9):
+            return base_lr * 0.001
+        elif epoch >= int(total_epochs * 0.6):
+            return base_lr * 0.01  
+        elif epoch >= int(total_epochs * 0.3):
+            return base_lr * 0.1
+        return base_lr

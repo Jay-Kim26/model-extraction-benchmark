@@ -196,7 +196,11 @@ class GAME(BaseAttack):
         loss = loss_real + loss_fake
 
         if real_class is not None:
-            loss += F.cross_entropy(real_class, real_labels.long())
+            # Only apply class loss for labels within valid range (handles OOD proxy)
+            valid_mask = real_labels < self.num_classes
+            if valid_mask.any():
+                loss += F.cross_entropy(real_class[valid_mask], real_labels[valid_mask].long())
+            
             if fake_labels is not None:
                 loss += F.cross_entropy(fake_class, fake_labels.long())
         loss.backward()
