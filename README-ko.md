@@ -9,7 +9,7 @@
 
 **모델 추출 공격(Model Extraction Attacks)의 공정한 비교를 위한 엄밀한 논문급 벤치마크**
 
-[English](README.md) • [Paper](https://arxiv.org/abs/2305.14890) • [문서](Model_Extraction_Benchmark_v1.0.1_Contract_and_Implementation_Guide.md) • [에이전트 가이드](AGENTS.md)
+[English](README.md) • [문서](Model_Extraction_Benchmark_v1.0.1_Contract_and_Implementation_Guide.md) • [에이전트 가이드](AGENTS.md)
 
 </div>
 
