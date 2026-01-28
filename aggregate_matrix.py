@@ -37,6 +37,7 @@ def aggregate_matrix(root_dir="runs", output_root="reports"):
                 
                 seed = seed_dir.name.split('_')[1]
                 summary_path = seed_dir / "summary.json"
+                config_path = seed_dir / "run_config.yaml"
                 if not summary_path.exists(): continue
                 
                 try:
@@ -47,6 +48,18 @@ def aggregate_matrix(root_dir="runs", output_root="reports"):
                     continue
                 
                 attack_name = data.get("attack", "unknown").upper()
+                
+                # [FIX] Distinguish ActiveThief by strategy
+                if attack_name == "ACTIVETHIEF" and config_path.exists():
+                    try:
+                        import yaml
+                        with open(config_path, 'r') as f:
+                            cfg = yaml.safe_load(f)
+                        strategy = cfg.get("attack", {}).get("strategy", "unknown")
+                        attack_name = f"ACTIVETHIEF ({strategy.upper()})"
+                    except Exception as e:
+                        print(f"Error reading config {config_path}: {e}")
+                
                 victim_id = data.get("victim_id", "unknown")
                 substitute_arch = data.get("substitute_arch", "unknown")
                 
