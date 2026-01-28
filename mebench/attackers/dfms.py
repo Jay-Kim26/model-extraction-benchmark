@@ -20,7 +20,6 @@ class DFMSHL(BaseAttack):
         super().__init__(config, state)
 
         self.batch_size = int(config.get("batch_size", 128))
-        # Official settings commonly use clone lr=0.1 (SGD).
         self.clone_lr = float(config.get("clone_lr", 0.1))
         self.generator_lr = float(config.get("generator_lr", 2e-4))
         self.discriminator_lr = float(config.get("discriminator_lr", 2e-4))
@@ -31,8 +30,10 @@ class DFMSHL(BaseAttack):
             or state.metadata.get("dataset_config", {}).get("num_classes", 10)
         )
         self.base_channels = int(config.get("base_channels", 64))
-        default_diversity = 500.0 if self.num_classes == 10 else 100.0
-        self.diversity_weight = float(config.get("diversity_weight", default_diversity))
+        
+        # [STRICT] Paper specifies lambda_div = 500.0 for CIFAR-10.
+        self.diversity_weight = float(config.get("diversity_weight", 500.0))
+        
         self.pretrain_steps = int(config.get("pretrain_steps", 200))
         self.use_clone_cosine = bool(config.get("use_clone_cosine", True))
 
@@ -126,7 +127,11 @@ class DFMSHL(BaseAttack):
         device = state.metadata.get("device", "cpu")
         z = torch.randn(k, self.noise_dim, device=device)
         with torch.no_grad():
-            x = self.generator(z)
+            x_raw = self.generator(z)
+        
+        # [FIX] Normalization: [-1, 1] -> [0, 1] (Required for Benchmark Contract)
+        x = x_raw * 0.5 + 0.5
+        
         meta = {"generator_step": state.attack_state["step"], "synthetic": True}
         return QueryBatch(x=x, meta=meta)
 
@@ -147,6 +152,8 @@ class DFMSHL(BaseAttack):
             hard_labels = torch.argmax(oracle_output.y, dim=1)
 
         hard_labels = hard_labels.to(device)
+        
+        # x_fake comes from propose(), so it is already in [0, 1]
         x_fake = query_batch.x
 
         real_x = self._next_proxy_batch(device)
@@ -182,29 +189,33 @@ class DFMSHL(BaseAttack):
         self.discriminator_optimizer.step()
 
     def _train_generator(self, fake_x: torch.Tensor) -> None:
+        # Regenerate to maintain gradient graph from z to G(z)
+        z = torch.randn(self.batch_size, self.noise_dim, device=fake_x.device)
+        fake_x_gen_raw = self.generator(z)
+        fake_x_gen = fake_x_gen_raw * 0.5 + 0.5  # [-1, 1] -> [0, 1]
+
         self.generator_optimizer.zero_grad()
-        fake_logits = self.discriminator(fake_x)
+        fake_logits = self.discriminator(fake_x_gen)
         real_labels = torch.ones_like(fake_logits)
         adv_loss = F.binary_cross_entropy_with_logits(fake_logits, real_labels)
 
-        with torch.no_grad():
-            victim_config = self.state.metadata.get("victim_config", {})
-            normalization = victim_config.get("normalization")
-            if normalization is None:
-                normalization = {"mean": [0.0], "std": [1.0]}
-            norm_mean = torch.tensor(normalization["mean"]).view(1, -1, 1, 1).to(fake_x.device)
-            norm_std = torch.tensor(normalization["std"]).view(1, -1, 1, 1).to(fake_x.device)
-            def _norm(x):
-                if x.min() < -0.1:
-                    x = x * 0.5 + 0.5
-                return (x - norm_mean) / norm_std
-            
-            clone_logits = self.clone(_norm(fake_x))
+        victim_config = self.state.metadata.get("victim_config", {})
+        normalization = victim_config.get("normalization")
+        if normalization is None:
+            normalization = {"mean": [0.0], "std": [1.0]}
+        norm_mean = torch.tensor(normalization["mean"]).view(1, -1, 1, 1).to(fake_x.device)
+        norm_std = torch.tensor(normalization["std"]).view(1, -1, 1, 1).to(fake_x.device)
+        
+        def _norm(x):
+            return (x - norm_mean) / norm_std
+        
+        clone_logits = self.clone(_norm(fake_x_gen))
         probs = F.softmax(clone_logits, dim=1)
-        # Paper DFMS-HL: class-diversity loss uses entropy of the batch-mean
-        # class distribution alpha (not mean of per-sample entropies).
+        
+        # Diversity: entropy of batch-mean distribution alpha.
         alpha = probs.mean(dim=0)
         class_div = torch.sum(alpha * torch.log(alpha + 1e-6))
+        
         loss = adv_loss + self.diversity_weight * class_div
         loss.backward()
         self.generator_optimizer.step()
@@ -213,9 +224,19 @@ class DFMSHL(BaseAttack):
         for _ in range(self.pretrain_steps):
             real_x = self._next_proxy_batch(device)
             z = torch.randn(real_x.size(0), self.noise_dim, device=device)
-            fake_x = self.generator(z)
+            fake_x = self.generator(z) * 0.5 + 0.5
+            
             self._train_discriminator(real_x, fake_x)
-            self._train_generator(fake_x)
+            
+            z2 = torch.randn(real_x.size(0), self.noise_dim, device=device)
+            fake_x_2 = self.generator(z2) * 0.5 + 0.5
+            
+            self.generator_optimizer.zero_grad()
+            fake_logits = self.discriminator(fake_x_2)
+            real_labels = torch.ones_like(fake_logits)
+            loss_g = F.binary_cross_entropy_with_logits(fake_logits, real_labels)
+            loss_g.backward()
+            self.generator_optimizer.step()
 
     def _train_clone(self, x_fake: torch.Tensor, hard_labels: torch.Tensor) -> None:
         victim_config = self.state.metadata.get("victim_config", {})
@@ -225,12 +246,7 @@ class DFMSHL(BaseAttack):
         norm_mean = torch.tensor(normalization["mean"]).view(1, -1, 1, 1).to(x_fake.device)
         norm_std = torch.tensor(normalization["std"]).view(1, -1, 1, 1).to(x_fake.device)
         
-        # DFMS generates in [-1, 1] usually (check GAN implementation)
-        # Assuming [0, 1] for proxy but [-1, 1] for generator.
-        # Let's normalize consistent with Oracle fix.
         def _norm(x):
-            if x.min() < -0.1:
-                x = x * 0.5 + 0.5
             return (x - norm_mean) / norm_std
 
         self.clone_optimizer.zero_grad()

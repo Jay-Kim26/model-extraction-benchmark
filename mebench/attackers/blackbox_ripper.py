@@ -35,15 +35,15 @@ class BlackboxRipper(BaseAttack):
         self.fitness_threshold = float(config.get("fitness_threshold", 0.02))
         self.max_evolve_iters = int(config.get("max_evolve_iters", 10))
         
-        # Training: 200 epochs, batch size 64. No explicit "train_every" in paper,
-        # but implies training on collected samples until convergence.
-        # We align with round-based updates for efficiency.
         total_budget = int(state.metadata.get("max_budget", 10000))
         self.train_every = int(config.get("train_every", max(256, total_budget // 10)))
         
         self.pretrain_steps = int(config.get("pretrain_steps", 100))
         self.substitute_lr = float(config.get("substitute_lr", 0.01))
-        self.substitute_epochs = int(config.get("substitute_epochs", 200)) # Paper: 200 epochs
+        
+        # [STRICT] Paper specifies training for 200 epochs.
+        self.substitute_epochs = int(config.get("substitute_epochs", 200))
+        
         self.base_channels = int(config.get("base_channels", 64))
         self.gan_backbone = str(config.get("gan_backbone", "sngan")).lower()
         self.num_classes = int(
@@ -148,7 +148,6 @@ class BlackboxRipper(BaseAttack):
             or reset_population
             or evolve_iter >= self.max_evolve_iters
         ):
-            # Paper: initialize population from uniform U(-u, u)
             u = float(self.latent_bound)
             population = (torch.rand(population_size, self.noise_dim, device=device) * 2.0 - 1.0) * u
             targets = torch.randint(0, self.num_classes, (population_size,), device=device)
@@ -158,7 +157,11 @@ class BlackboxRipper(BaseAttack):
             state.attack_state["reset_population"] = False
 
         with torch.no_grad():
-            x = self.generator(population)[:k]
+            x_raw = self.generator(population)[:k]
+        
+        # [FIX] Normalization: [-1, 1] -> [0, 1] (Required for Benchmark Contract)
+        x = x_raw * 0.5 + 0.5
+        
         meta = {
             "population": population.detach().cpu(),
             "targets": targets.detach().cpu(),
@@ -205,14 +208,12 @@ class BlackboxRipper(BaseAttack):
                 oracle_output.y, num_classes=self.num_classes
             ).float().to(population.device)
 
-        # Fitness: minimize MSE to the one-hot target.
         targets = targets[: victim_probs.size(0)].to(population.device)
         target_onehot = F.one_hot(targets, num_classes=self.num_classes).float()
         diff = victim_probs - target_onehot
         mse = (diff * diff).mean(dim=1)
         fitness = -mse
 
-        # Stop condition: if we found a sufficiently good sample, restart search.
         if mse.numel() > 0 and float(mse.min().item()) <= float(self.fitness_threshold):
             state.attack_state["reset_population"] = True
 
@@ -220,7 +221,6 @@ class BlackboxRipper(BaseAttack):
         elite_idx = torch.topk(fitness, elite_count).indices
         elite = population[elite_idx]
 
-        # Two mutation passes from elites (mirrors reference code pattern).
         mutated_1 = elite + torch.randn_like(elite) * self.mutation_scale
         mutated_2 = elite + torch.randn_like(elite) * self.mutation_scale
         new_population = torch.cat([elite, mutated_1, mutated_2], dim=0)
@@ -249,7 +249,7 @@ class BlackboxRipper(BaseAttack):
         for _ in range(self.pretrain_steps):
             real_x = self._next_proxy_batch(device)
             z = torch.randn(real_x.size(0), self.noise_dim, device=device)
-            fake_x = self.generator(z)
+            fake_x = self.generator(z) * 0.5 + 0.5
 
             self.dis_optimizer.zero_grad()
             real_logits = self.discriminator(real_x)
@@ -324,7 +324,6 @@ class BlackboxRipper(BaseAttack):
         for _ in range(epochs):
             for x_batch, y_batch in loader:
                 x_batch = x_batch.to(device)
-                # Normalize images for substitute
                 x_batch = (x_batch - norm_mean) / norm_std
                 
                 self.substitute_optimizer.zero_grad()
