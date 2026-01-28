@@ -48,6 +48,7 @@ def aggregate_matrix(root_dir="runs", output_root="reports"):
                     continue
                 
                 attack_name = data.get("attack", "unknown").upper()
+                max_budget = data.get("max_budget") # [FIX] Get max_budget of the run
                 
                 # [FIX] Distinguish ActiveThief by strategy
                 if attack_name == "ACTIVETHIEF" and config_path.exists():
@@ -63,17 +64,16 @@ def aggregate_matrix(root_dir="runs", output_root="reports"):
                 victim_id = data.get("victim_id", "unknown")
                 substitute_arch = data.get("substitute_arch", "unknown")
                 
-                # 3. Extract data from ALL available checkpoints
+                # 3. Extract data ONLY from the final checkpoint (Max Budget)
                 for cp_str, tracks in data.get("checkpoints", {}).items():
                     if "track_a" not in tracks: continue
-                    metrics = tracks["track_a"]
                     budget = int(cp_str)
                     
-                    # Heuristic for AL attacks to avoid intermediate checkpoint pollution
-                    # (only if we want to follow the strict protocol of comparing final results)
-                    # However, for a full matrix we usually want to see the curve.
-                    # But for 'Report' purposes, let's keep all and filter during pivoting.
+                    # [STRICT] Only collect final results to avoid pollution
+                    if max_budget is not None and budget != int(max_budget):
+                        continue
                     
+                    metrics = tracks["track_a"]
                     results.append({
                         "Set": set_id,
                         "Attack": attack_name,
