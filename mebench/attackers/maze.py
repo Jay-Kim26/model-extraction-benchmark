@@ -245,7 +245,10 @@ class MAZE(BaseAttack):
                 loss_p = loss_pert_all[cursor_pert : cursor_pert + m_eff]
                 dirs = directions[i, :m_eff].view(m_eff, -1)
                 loss_diff = (loss_p - loss_i) / float(self.grad_approx_epsilon)
-                g = torch.sum(loss_diff.view(m_eff, 1) * dirs, dim=0)
+                # [FIX] Averaging over m directions (Monte Carlo estimation)
+                # Original: sum (magnitude dependent on m)
+                # Correct: mean (unbiased estimator)
+                g = torch.mean(loss_diff.view(m_eff, 1) * dirs, dim=0)
                 grad_est[i] = g.view_as(grad_est[i])
                 cursor_pert += m_eff
 
