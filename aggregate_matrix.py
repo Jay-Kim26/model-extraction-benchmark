@@ -4,69 +4,75 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 
-def aggregate_matrix(root_dir="runs"):
+def aggregate_matrix(root_dir="runs", output_root="reports"):
     results = []
     root = Path(root_dir)
+    output_path = Path(output_root)
+    output_path.mkdir(exist_ok=True)
+    
+    if not root.exists():
+        print(f"Root directory {root_dir} does not exist.")
+        return
+
+    print("Gathering results from runs...")
     
     # 1. Walk through the runs directory
     for run_dir in root.iterdir():
         if not run_dir.is_dir(): continue
         
-        # Expected name format: SET-ID_attack[_budget]_seedS
+        # Expected name format: SET-ID_attack_...
         parts = run_dir.name.split('_')
-        if len(parts) < 3: continue
+        if len(parts) < 2: continue
         
         set_id = parts[0]
-        # Handle cases like activethief_uncertainty
-        if parts[2].endswith('k'):
-             attack = parts[1]
-             # If attack variant like activethief_uncertainty_1k
-             if parts[1] == "activethief" and not parts[2].endswith('k'):
-                 # This logic needs to be more robust
-                 pass
+        # Robust attack name extraction (everything between SET-ID and seed/budget if exists)
+        # But we can also get it from summary.json
         
-        # Simpler robust parsing
-        name_no_seed = "_".join(parts[:-1]) # e.g., SET-A1_activethief_uncertainty_1k
-        attack_part = "_".join(parts[1:-1]) # e.g., activethief_uncertainty_1k or dfme
-        
-        # 2. Find the latest timestamp
-        timestamps = sorted([d for d in run_dir.iterdir() if d.is_dir()])
-        if not timestamps: continue
-        latest_run = timestamps[-1]
-        
-        # 3. Iterate through seeds (0, 1, 2)
-        for seed_dir in latest_run.iterdir():
-            if not seed_dir.is_dir() or not seed_dir.name.startswith("seed_"): continue
-            seed = seed_dir.name.split('_')[1]
+        # 2. Find all seed directories in any timestamp subfolder
+        for timestamp_dir in run_dir.iterdir():
+            if not timestamp_dir.is_dir(): continue
             
-            summary_path = seed_dir / "summary.json"
-            if not summary_path.exists(): continue
-            
-            with open(summary_path, 'r') as f:
-                data = json.load(f)
-            
-            # 4. Extract data from ALL available checkpoints
-            for cp_str, tracks in data.get("checkpoints", {}).items():
-                if "track_a" not in tracks: continue
-                metrics = tracks["track_a"]
+            for seed_dir in timestamp_dir.iterdir():
+                if not seed_dir.is_dir() or not seed_dir.name.startswith("seed_"): continue
                 
-                # Check if this is the 'Final' budget for an AL run
-                # (to avoid using intermediate checkpoints of 10k/20k runs which are unfair)
-                is_al_attack = any(al in attack_part for al in ["activethief", "swiftthief", "cloudleak", "inversenet"])
-                if is_al_attack:
-                    # For AL, only take the checkpoint that matches the run's max_budget
-                    max_b = int(data.get("max_budget", 0))
-                    if int(cp_str) != max_b:
-                        continue
+                seed = seed_dir.name.split('_')[1]
+                summary_path = seed_dir / "summary.json"
+                if not summary_path.exists(): continue
                 
-                results.append({
-                    "Set": set_id,
-                    "Attack": attack_part.replace("_1k","").replace("_10k","").replace("_20k","").upper(),
-                    "Budget": int(cp_str),
-                    "Seed": seed,
-                    "Accuracy": metrics["acc_gt"],
-                    "Agreement": metrics["agreement"]
-                })
+                try:
+                    with open(summary_path, 'r') as f:
+                        data = json.load(f)
+                except Exception as e:
+                    print(f"Error reading {summary_path}: {e}")
+                    continue
+                
+                attack_name = data.get("attack", "unknown").upper()
+                victim_id = data.get("victim_id", "unknown")
+                substitute_arch = data.get("substitute_arch", "unknown")
+                
+                # 3. Extract data from ALL available checkpoints
+                for cp_str, tracks in data.get("checkpoints", {}).items():
+                    if "track_a" not in tracks: continue
+                    metrics = tracks["track_a"]
+                    budget = int(cp_str)
+                    
+                    # Heuristic for AL attacks to avoid intermediate checkpoint pollution
+                    # (only if we want to follow the strict protocol of comparing final results)
+                    # However, for a full matrix we usually want to see the curve.
+                    # But for 'Report' purposes, let's keep all and filter during pivoting.
+                    
+                    results.append({
+                        "Set": set_id,
+                        "Attack": attack_name,
+                        "Budget": budget,
+                        "Seed": seed,
+                        "Accuracy": metrics.get("acc_gt", 0),
+                        "Agreement": metrics.get("agreement", 0),
+                        "KL": metrics.get("kl_mean", 0),
+                        "L1": metrics.get("l1_mean", 0),
+                        "Victim": victim_id,
+                        "Substitute": substitute_arch
+                    })
 
     if not results:
         print("No results found to aggregate.")
@@ -74,85 +80,92 @@ def aggregate_matrix(root_dir="runs"):
 
     df = pd.DataFrame(results)
     
-    # 5. Process for each budget separately
-    all_budgets = sorted(df["Budget"].unique())
-    print(f"\nFound results for budgets: {all_budgets}")
-
-    for budget in all_budgets:
-        b_df = df[df["Budget"] == budget]
-        if b_df.empty: continue
+    # Save raw master data
+    df.to_csv(output_path / "master_results_raw.csv", index=False)
+    
+    # 4. Generate Reports per Set
+    all_sets = sorted(df["Set"].unique())
+    
+    for s_id in all_sets:
+        s_df = df[df["Set"] == s_id]
+        s_dir = output_path / s_id
+        s_dir.mkdir(exist_ok=True)
         
-        # Group by Set and Attack to compute Mean and Std
-        stats = b_df.groupby(["Set", "Attack"])[["Accuracy", "Agreement"]].agg(["mean", "std"]).reset_index()
+        # Save set-specific raw data
+        s_df.to_csv(s_dir / "results_raw.csv", index=False)
+        
+        # Group and compute Mean/Std
+        stats = s_df.groupby(["Attack", "Budget"])[["Accuracy", "Agreement", "KL"]].agg(["mean", "std"]).reset_index()
         stats.columns = [f"{col[0]}_{col[1]}" if col[1] else col[0] for col in stats.columns]
         
-        # Format as Mean ± Std
-        stats["Accuracy (mean+std)"] = stats.apply(lambda x: f"{x['Accuracy_mean']:.4f} ± {x['Accuracy_std']:.4f}" if not pd.isna(x['Accuracy_std']) else f"{x['Accuracy_mean']:.4f}", axis=1)
-        stats["Agreement (mean+std)"] = stats.apply(lambda x: f"{x['Agreement_mean']:.4f} ± {x['Agreement_std']:.4f}" if not pd.isna(x['Agreement_std']) else f"{x['Agreement_mean']:.4f}", axis=1)
+        # Format for table
+        stats["Acc_Display"] = stats.apply(lambda x: f"{x['Accuracy_mean']:.4f}" + (f" ± {x['Accuracy_std']:.4f}" if not pd.isna(x['Accuracy_std']) else ""), axis=1)
+        stats["Agr_Display"] = stats.apply(lambda x: f"{x['Agreement_mean']:.4f}" + (f" ± {x['Agreement_std']:.4f}" if not pd.isna(x['Agreement_std']) else ""), axis=1)
         
-        pivot_acc = stats.pivot(index="Attack", columns="Set", values="Accuracy (mean+std)")
+        # Pivot for easy reading: Row=Attack, Column=Budget
+        pivot_acc = stats.pivot(index="Attack", columns="Budget", values="Acc_Display").fillna("-")
+        pivot_acc.columns = [f"{c//1000}k" if c >= 1000 else str(c) for c in pivot_acc.columns]
         
-        print(f"\n### Extraction Accuracy (mean+std) - Budget: {budget//1000}k")
-        print(pivot_acc.to_markdown())
+        # Determine winners
+        winners = {}
+        for budget in sorted(s_df["Budget"].unique()):
+            b_df = s_df[s_df["Budget"] == budget]
+            if not b_df.empty:
+                # Group by attack and get mean
+                means = b_df.groupby("Attack")["Accuracy"].mean()
+                if not means.empty:
+                    best_attack = means.idxmax()
+                    best_val = means.max()
+                    winners[budget] = (best_attack, best_val)
+
+        # Write Markdown Report
+        with open(s_dir / "REPORT.md", "w", encoding='utf-8') as f:
+            f.write(f"# Experimental Report: {s_id}\n\n")
+            
+            # Metadata
+            v_id = s_df["Victim"].iloc[0]
+            s_arch = s_df["Substitute"].iloc[0]
+            f.write(f"**Victim ID:** `{v_id}`  \n")
+            f.write(f"**Substitute Arch:** `{s_arch}`\n\n")
+            
+            f.write("## 🏆 Winners by Budget\n\n")
+            f.write("| Budget | Best Attack | Accuracy |\n")
+            f.write("|:---|:---|:---:|\n")
+            for b in sorted(winners.keys()):
+                atk, val = winners[b]
+                label = f"{b//1000}k" if b >= 1000 else str(b)
+                f.write(f"| {label} | **{atk}** | {val:.4f} |\n")
+            f.write("\n")
+
+            f.write("## 📊 Extraction Accuracy (Mean ± Std)\n\n")
+            f.write(pivot_acc.to_markdown() + "\n\n")
+            
+            f.write("## 🔍 Detailed Metrics (Agreement)\n\n")
+            pivot_agr = stats.pivot(index="Attack", columns="Budget", values="Agr_Display").fillna("-")
+            pivot_agr.columns = [f"{c//1000}k" if c >= 1000 else str(c) for c in pivot_agr.columns]
+            f.write(pivot_agr.to_markdown() + "\n\n")
+            
+            f.write("---\n*Generated by Model Extraction Benchmark Aggregator*")
+            
+        print(f"Generated report for {s_id} in {s_dir}")
+
+    # 5. Generate Master Summary
+    with open(output_path / "MASTER_SUMMARY.md", "w", encoding='utf-8') as f:
+        f.write("# 🏆 Model Extraction Benchmark Master Summary\n\n")
         
-        pivot_acc.to_csv(f"matrix_results_accuracy_{budget//1000}k.csv", encoding='utf-8')
-        
-    # Full dump for custom analysis
-    df.to_csv("matrix_results_all_raw.csv", index=False, encoding='utf-8')
-    print("\nArtifacts saved: matrix_results_accuracy_{Nk}.csv, matrix_results_all_raw.csv")
-
-    if not results:
-        print("No results found to aggregate.")
-        return
-
-    df = pd.DataFrame(results)
-    
-    # 5. Group by Set and Attack to compute Mean and Std
-    stats = df.groupby(["Set", "Attack"])[["Accuracy", "Agreement"]].agg(["mean", "std"]).reset_index()
-    
-    # Flatten columns: Accuracy_mean, Accuracy_std, etc.
-    stats.columns = [f"{col[0]}_{col[1]}" if col[1] else col[0] for col in stats.columns]
-    
-    # 6. Format as Mean ± Std
-    stats["Accuracy (mean+std)"] = stats.apply(lambda x: f"{x['Accuracy_mean']:.4f} + {x['Accuracy_std']:.4f}" if not pd.isna(x['Accuracy_std']) else f"{x['Accuracy_mean']:.4f}", axis=1)
-    stats["Agreement (mean+std)"] = stats.apply(lambda x: f"{x['Agreement_mean']:.4f} + {x['Agreement_std']:.4f}" if not pd.isna(x['Agreement_std']) else f"{x['Agreement_mean']:.4f}", axis=1)
-    
-    # 7. Pivot for Paper Table
-    # Row: Attack, Column: Set
-    pivot_acc = stats.pivot(index="Attack", columns="Set", values="Accuracy (mean+std)")
-    pivot_agr = stats.pivot(index="Attack", columns="Set", values="Agreement (mean+std)")
-    
-    print("\n### Extraction Accuracy (mean+std) across Experimental Sets")
-    print(pivot_acc.to_markdown())
-
-    print("\n### Extraction Agreement (mean+std) across Experimental Sets")
-    print(pivot_agr.to_markdown())
-    
-    pivot_acc.to_csv("matrix_results_accuracy.csv", encoding='utf-8')
-    pivot_agr.to_csv("matrix_results_agreement.csv", encoding='utf-8')
-    
-    # Save full summary stats
-    stats.to_csv("matrix_results_summary.csv", index=False, encoding='utf-8')
-    
-    # Generate LaTeX for Accuracy
-    latex_acc = pivot_acc.to_latex(
-        caption="Model Extraction Accuracy (mean $\\pm$ std) across different Victim-Surrogate setups (10k Budget).",
-        label="tab:matrix_results_acc",
-        escape=False
-    )
-    with open("matrix_results_accuracy.tex", "w", encoding='utf-8') as f:
-        f.write(latex_acc)
-
-    # Generate LaTeX for Agreement
-    latex_agr = pivot_agr.to_latex(
-        caption="Model Extraction Agreement (mean $\\pm$ std) across different Victim-Surrogate setups (10k Budget).",
-        label="tab:matrix_results_agr",
-        escape=False
-    )
-    with open("matrix_results_agreement.tex", "w", encoding='utf-8') as f:
-        f.write(latex_agr)
-    
-    print("\nArtifacts saved: matrix_results_{accuracy,agreement,summary}.csv, matrix_results_{accuracy,agreement}.tex")
+        # For each budget, show a comparison across all sets
+        common_budgets = sorted(df["Budget"].unique())
+        for budget in common_budgets:
+            b_df = df[df["Budget"] == budget]
+            b_stats = b_df.groupby(["Set", "Attack"])["Accuracy"].mean().reset_index()
+            # Pivot: Set as Columns, Attack as Rows
+            master_pivot = b_stats.pivot(index="Attack", columns="Set", values="Accuracy")
+            
+            label = f"{budget//1000}k" if budget >= 1000 else str(budget)
+            f.write(f"## Budget: {label}\n\n")
+            f.write(master_pivot.to_markdown() + "\n\n")
+            
+    print(f"\nMaster summary available at {output_path / 'MASTER_SUMMARY.md'}")
 
 if __name__ == "__main__":
     aggregate_matrix()
