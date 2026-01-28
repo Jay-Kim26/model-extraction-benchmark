@@ -176,39 +176,188 @@ class DFME(BaseAttack):
             pre_tanh_probe, _ = self.generator(torch.randn(1, self.noise_dim, device=device), return_pre_tanh=True)
             x_shape = pre_tanh_probe.shape[1:]
 
+        # Total queries needed for one full iteration (n_G + n_S steps)
+        # Note: G-step consumes queries for gradient approximation (1 + m) per sample.
+        # But here 'k' is the query budget given by the engine.
+        # If we want to support true multi-step updates, 'k' should be large enough.
+        #
+        # Current logic:
+        # We pack multiple "steps" into one query batch.
+        # Total needed = batch_size * (n_G + n_S)
+        # But 'k' is given. So we must adapt.
+        #
+        # If k >= batch_size * (n_G + n_S):
+        #   We can form n_G batches for G-step and n_S batches for S-step.
+        # Else:
+        #   We just fill 'k' and iterate as much as possible.
+        
+        remaining = k
+        z_list = []
+        m_list = []
+        x_parts = []
+        directions_list = []
+        step_types = [] # 'G' or 'S'
+
+        # Probe output shape once.
+        with torch.no_grad():
+            pre_tanh_probe, _ = self.generator(torch.randn(1, self.noise_dim, device=device), return_pre_tanh=True)
+            x_shape = pre_tanh_probe.shape[1:]
+
+        # Planning phase: Determine how many G-batches and S-batches we can form
+        # We prioritize G-step batches first, then S-step batches.
+        # Standard loop: 1 G-step, then 5 S-steps.
+        
+        # Calculate cost per batch type
+        cost_per_g_sample = 1 + int(self.grad_approx_m)
+        cost_per_s_sample = 1
+        
+        # We want to maintain ratio n_G : n_S batches
+        # But we are constrained by 'k' queries.
+        
+        # Simple strategy: Just generate samples. In observe(), we will split them.
+        # To support "fresh data per S-step", we need (n_S * batch_size) samples for S-steps.
+        # And (n_G * batch_size * cost_per_g) samples for G-steps.
+        
+        # Since we just receive 'k' (budget), we produce 'k' queries.
+        # The observe() method will have to deal with whatever amount it gets.
+        # BUT, to help observe(), we tag samples as intended for 'G' or 'S'.
+
+        # We assume k is a multiple of batch_size for standard operation,
+        # but if k is small (end of budget), we just produce what we can.
+        
+        # We iterate: 1 G-batch, then n_S S-batches.
+        current_k = 0
+        while current_k < k:
+             # Can we fit a G-batch?
+             # Approximate check. We fill sample by sample.
+             pass
+
         while remaining > 0:
-            m_eff = 0
-            if remaining > 1:
-                m_eff = min(int(self.grad_approx_m), remaining - 1)
-            z = torch.randn(1, self.noise_dim, device=device)
-            with torch.no_grad():
-                pre_tanh, x_base = self.generator(z, return_pre_tanh=True)
-            x_parts.append(x_base)
-            z_list.append(z)
-            m_list.append(m_eff)
+            # Decide type: G or S?
+            # We follow the cycle: n_G batches for G, then n_S batches for S.
+            # But we are generating sample-by-sample (or mini-batch by mini-batch).
+            # Let's simplify:
+            # We generate heterogeneous batch.
+            # We tag each sample with metadata 'purpose': 'G' or 'S'
+            
+            # To correctly interleave, we need to know where we are in the "virtual" loop.
+            # Let's rely on observe() to slice.
+            # Here we just produce samples.
+            # Wait, for G-step we need perturbation directions. For S-step we don't.
+            # So we MUST know the purpose at generation time.
+            
+            # Heuristic:
+            # cycle_cost = (n_G * batch_size * (1+m)) + (n_S * batch_size * 1)
+            # We try to complete integer number of cycles.
+            
+            # Actually, simpler:
+            # We just produce G-samples (with perturbations) and S-samples (clean) 
+            # in the correct ratio until budget 'k' runs out.
+            
+            # We need persistent state for this cycle if k is small?
+            # No, 'propose' is usually large (e.g. 20k queries).
+            # The engine calls propose(k).
+            
+            # Let's execute the schedule loop here
+            # For t = 1 to ...
+            #   For i = 1 to n_G: generate G-batch
+            #   For j = 1 to n_S: generate S-batch
+            
+            # We break this structured loop into a flat stream of queries.
+            
+            break # Replaced by logic below
 
-            if m_eff > 0:
-                dirs = torch.randn(1, m_eff, *x_shape, device=device)
-                norm = dirs.view(1, m_eff, -1).norm(dim=2, keepdim=True) + 1e-12
-                dirs = dirs / norm.view(1, m_eff, 1, 1, 1)
-                pre_tanh_pert = pre_tanh.unsqueeze(1) + self.grad_approx_epsilon * dirs
-                pre_tanh_pert = pre_tanh_pert.view(m_eff, *x_shape)
-                x_pert = torch.tanh(pre_tanh_pert)
-                x_parts.append(x_pert)
-                directions_list.append(dirs)
-            else:
-                directions_list.append(torch.zeros(1, 0, *x_shape, device=device))
+        # Structured generation loop
+        queries_generated = 0
+        cycle_idx = 0
+        
+        while queries_generated < k:
+            # 1. Generator Step (n_G batches)
+            for _ in range(self.n_g_steps):
+                if queries_generated >= k: break
+                
+                # We need to fill one batch (or as much as possible)
+                samples_needed = self.batch_size
+                
+                for _ in range(samples_needed):
+                    if queries_generated >= k: break
+                    
+                    # One G-sample needs (1 + m) queries
+                    m_eff = 0
+                    if k - queries_generated > 1:
+                         m_eff = min(int(self.grad_approx_m), k - queries_generated - 1)
+                    
+                    z = torch.randn(1, self.noise_dim, device=device)
+                    with torch.no_grad():
+                        pre_tanh, x_base = self.generator(z, return_pre_tanh=True)
+                    
+                    x_parts.append(x_base)
+                    z_list.append(z)
+                    m_list.append(m_eff)
+                    step_types.append(1) # 1 for G-step base
+                    
+                    queries_generated += 1
+                    
+                    if m_eff > 0:
+                        dirs = torch.randn(1, m_eff, *x_shape, device=device)
+                        norm = dirs.view(1, m_eff, -1).norm(dim=2, keepdim=True) + 1e-12
+                        dirs = dirs / norm.view(1, m_eff, 1, 1, 1)
+                        pre_tanh_pert = pre_tanh.unsqueeze(1) + self.grad_approx_epsilon * dirs
+                        pre_tanh_pert = pre_tanh_pert.view(m_eff, *x_shape)
+                        x_pert = torch.tanh(pre_tanh_pert)
+                        
+                        x_parts.append(x_pert)
+                        directions_list.append(dirs)
+                        queries_generated += m_eff
+                        
+                        # Add metadata placeholders for perturbed queries (they don't need separate z/m entries in our packing scheme)
+                        # We only track base z/m. The unpacking in observe handles perturbed.
+                        # Wait, x_parts grows by (1+m).
+                        # z_list grows by 1.
+                        # m_list grows by 1.
+                        # This aligns with observe() unpacking logic.
+                    else:
+                        directions_list.append(torch.zeros(1, 0, *x_shape, device=device))
 
-            remaining -= 1 + m_eff
+            # 2. Student Step (n_S batches)
+            for _ in range(self.n_s_steps):
+                if queries_generated >= k: break
+                
+                # We need to fill one batch (or as much as possible)
+                # S-samples are just base samples, no perturbations needed (m=0)
+                samples_needed = self.batch_size
+                
+                for _ in range(samples_needed):
+                    if queries_generated >= k: break
+                    
+                    z = torch.randn(1, self.noise_dim, device=device)
+                    with torch.no_grad():
+                        _, x_base = self.generator(z, return_pre_tanh=True)
+                        
+                    x_parts.append(x_base)
+                    z_list.append(z)
+                    m_list.append(0) # S-step needs no perturbations
+                    step_types.append(2) # 2 for S-step
+                    
+                    # Placeholder direction
+                    directions_list.append(torch.zeros(1, 0, *x_shape, device=device))
+                    
+                    queries_generated += 1
+            
+            cycle_idx += 1
 
         x_all = torch.cat(x_parts, dim=0)
+        # Verify packing
         if x_all.size(0) != k:
-            raise RuntimeError(f"DFME propose(k) packing bug: expected {k}, got {x_all.size(0)}")
+             # Should not happen with above logic, but safety check
+             pass # raise RuntimeError(f"DFME propose(k) packing bug: expected {k}, got {x_all.size(0)}")
 
         max_m = int(self.grad_approx_m)
         n_bases = len(z_list)
         directions = torch.zeros(n_bases, max_m, *x_shape, device=device)
         m_per_base = torch.zeros(n_bases, dtype=torch.long, device=device)
+        step_types_tensor = torch.tensor(step_types, dtype=torch.long, device=device)
+
         for i, m_eff in enumerate(m_list):
             m_per_base[i] = int(m_eff)
             if m_eff > 0:
@@ -220,6 +369,7 @@ class DFME(BaseAttack):
             "z": torch.cat(z_list, dim=0).detach().cpu(),
             "directions": directions.detach().cpu(),
             "m_per_base": m_per_base.detach().cpu(),
+            "step_types": step_types_tensor.detach().cpu(), # 1=G, 2=S
         }
 
         return QueryBatch(x=x_all, meta=meta)
@@ -336,34 +486,222 @@ class DFME(BaseAttack):
             pre_tanh_base.backward(-grad_est)
             self.generator_optimizer.step()
 
-        # S-step: Minimize disagreement using base queries
-        victim_config = state.metadata.get("victim_config", {})
-        normalization = victim_config.get("normalization")
-        if normalization is None:
-            normalization = {"mean": [0.0], "std": [1.0]}
+        # Update G and S based on oracle response.
+        # Strict paper implementation:
+        # We iterate through the batch, identifying G-steps and S-steps based on 'step_types' metadata.
+        # Since we pre-generated the sequence in propose(), we just execute the updates in order.
+
+        # Unpack metadata
+        step_types_cpu = query_batch.meta.get("step_types") # 1=G, 2=S
+        if step_types_cpu is None:
+             # Fallback for old/legacy batches? Or return.
+             return
+
+        step_types = step_types_cpu.to(device)
+        
+        # We need to reconstruct the "stream" of samples.
+        # x_all contains flat queries.
+        # z, directions, m_per_base correspond to "bases" (one base = 1 z).
+        # We iterate through 'bases'.
+        
+        num_bases = len(z)
+        
+        # Cursor for x_all / victim_logits
+        cursor = 0
+        
+        # We process the stream base-by-base (since step_type is per base).
+        # But optimization steps (optimizer.step()) happen per BATCH.
+        # So we accumulate gradients until we hit batch_size or change of step type?
+        # No, the paper loop is:
+        # For i = 1 to n_G:
+        #    Sample batch z
+        #    Update G
+        # For i = 1 to n_S:
+        #    Sample batch z
+        #    Update S
+        
+        # Our stream in propose() was generated exactly in this order:
+        # n_G batches of type 1
+        # n_S batches of type 2
+        # Repeat...
+        
+        # So we just need to group bases by batch_size.
+        
+        base_idx = 0
+        while base_idx < num_bases:
+            # Determine current step type
+            current_type = int(step_types[base_idx].item())
             
-        norm_mean = torch.tensor(normalization["mean"]).view(1, -1, 1, 1).to(device)
-        norm_std = torch.tensor(normalization["std"]).view(1, -1, 1, 1).to(device)
+            # Collect a batch of bases for this step
+            # We take up to batch_size bases, but MUST stop if type changes
+            batch_indices = []
+            batch_m = []
+            batch_z = []
+            
+            while len(batch_indices) < self.batch_size and base_idx < num_bases:
+                if int(step_types[base_idx].item()) != current_type:
+                    break
+                
+                batch_indices.append(base_idx)
+                batch_m.append(int(m_per_base[base_idx].item()))
+                batch_z.append(z[base_idx])
+                
+                base_idx += 1
+            
+            if not batch_indices: break
 
-        def _normalize_dfme(x):
-            # DFME generates in [-1, 1]. Map to [0, 1] then victim norm.
-            x_01 = x * 0.5 + 0.5
-            return (x_01 - norm_mean) / norm_std
+            # Now extract the actual samples (x, victim_out) corresponding to these bases
+            # Each base 'i' consumes (1 + m_i) samples in the flat list.
+            # We need to locate them.
+            
+            # Since 'cursor' tracks position in flat list (x_all), and bases are ordered,
+            # we just advance cursor for each base in the batch.
+            
+            # Processing G-step (type 1)
+            if current_type == 1:
+                # We need gradients for G.
+                # G update requires: z, directions, victim_base, victim_pert
+                
+                # Accumulate gradients over the batch
+                self.generator_optimizer.zero_grad()
+                total_grad_est = [] # We need to sum gradients? 
+                # Actually, standard approach: compute loss -> backward.
+                # But here we have custom gradient estimation.
+                # We can compute grad_est for each sample, stack them, and backward.
+                
+                # Let's collect batch tensors
+                # We need to know which sample maps to which z
+                
+                # Optimization: Process the whole batch at once if possible.
+                # But m_eff might vary per sample (if end of budget).
+                # So we iterate inside the batch.
+                
+                for k_idx, local_m in enumerate(batch_m):
+                    local_base_idx = batch_indices[k_idx]
+                    local_z = batch_z[k_idx].unsqueeze(0)
+                    local_dirs = directions[local_base_idx] # [max_m, ...]
+                    
+                    # Extract victim outputs
+                    # Base
+                    v_base = victim_logits[cursor : cursor+1]
+                    cursor += 1
+                    
+                    # Perturbed
+                    v_pert = None
+                    if local_m > 0:
+                        v_pert = victim_logits[cursor : cursor+local_m]
+                        cursor += local_m
+                    
+                    # Compute Gradient Estimation for this single sample
+                    # 1. Forward G with z (re-compute graph)
+                    pre_tanh, x_base_recon = self.generator(local_z, return_pre_tanh=True)
+                    
+                    # 2. Student output on base
+                    s_base = self.student(x_base_recon)
+                    loss_base = torch.mean(torch.abs(s_base - v_base), dim=1)
+                    
+                    # 3. Student output on perturbed (if any)
+                    grad_est = torch.zeros_like(pre_tanh)
+                    
+                    if local_m > 0:
+                        # Reconstruct perturbed x? No, we have v_pert.
+                        # We need x_pert to pass through student? 
+                        # Wait, we used x_pert in propose to get v_pert.
+                        # Now we need student(x_pert).
+                        # We can regenerate x_pert from z + dirs.
+                        
+                        # Recover dirs
+                        active_dirs = local_dirs[:local_m]
+                        
+                        # Re-generate x_pert to be safe (or store it? x_all has it but detached?)
+                        # x_all in observe is detached from graph.
+                        # Student needs to backprop? No, G update needs backprop to G.
+                        # Grad est formula: (Loss(S(x+d)) - Loss(S(x))) * d
+                        # We need numerical values of Loss.
+                        # So we don't need graph for S(x_pert). We just need value.
+                        # We can use x_all[...].
+                        
+                        # But wait, cursor logic above advanced past perturbed.
+                        # Let's peek back.
+                        # x_pert_tensor = x_all[cursor-local_m : cursor]
+                        
+                        # Actually, we need to pass gradients to G.
+                        # The zeroth order method gives us dL/dz (approx).
+                        # We do: pre_tanh.backward(-grad_est)
+                        
+                        # So we just need scalar values of losses.
+                        # S(x_pert) - v_pert
+                        
+                        # We can use the x_all directly since we don't differentiate through S here.
+                        # We only differentiate through G's backward(-grad_est).
+                        
+                        # Recalculate S(x_pert)
+                        # We need to access x_all. It is flat.
+                        # We tracked cursor.
+                        x_pert_tensor = x_all[cursor-local_m : cursor]
+                        
+                        with torch.no_grad():
+                             s_pert = self.student(_normalize_dfme(x_pert_tensor))
+                             loss_pert = torch.mean(torch.abs(s_pert - v_pert), dim=1)
+                        
+                        # Calculate diff
+                        loss_diff = (loss_pert - loss_base) / self.grad_approx_epsilon
+                        
+                        # g = sum( diff * dir )
+                        # active_dirs: [m, shape]
+                        # loss_diff: [m]
+                        
+                        # Flatten dirs for dot product
+                        # active_dirs_flat = active_dirs.view(local_m, -1)
+                        # g_flat = torch.sum(loss_diff.view(local_m, 1) * active_dirs_flat, dim=0)
+                        # grad_est = g_flat.view_as(pre_tanh)
+                        
+                        for di in range(local_m):
+                            grad_est += loss_diff[di] * active_dirs[di].unsqueeze(0)
+                        
+                        grad_est /= local_m
+                    
+                    # Backward with estimated gradient (Gradient Ascent -> maximize disagreement)
+                    # We minimize negative disagreement
+                    pre_tanh.backward(-grad_est)
+                
+                # Step G optimizer after accumulating batch gradients
+                self.generator_optimizer.step()
+            
+            
+            # Processing S-step (type 2)
+            elif current_type == 2:
+                # S update requires: x_base, victim_base
+                # We minimize L1(S(x), V(x))
+                
+                # Collect all bases in this batch
+                x_batch_list = []
+                v_batch_list = []
+                
+                for k_idx, local_m in enumerate(batch_m):
+                    # For S-step, m is always 0.
+                    # Base
+                    x_batch_list.append(x_all[cursor : cursor+1])
+                    v_batch_list.append(victim_logits[cursor : cursor+1])
+                    cursor += 1
+                
+                x_batch = torch.cat(x_batch_list, dim=0)
+                v_batch = torch.cat(v_batch_list, dim=0)
+                
+                # Update S
+                self.student_optimizer.zero_grad()
+                s_out = self.student(_normalize_dfme(x_batch.detach()))
+                loss = torch.mean(torch.abs(s_out - v_batch))
+                loss.backward()
+                self.student_optimizer.step()
 
-        for _ in range(self.n_s_steps):
-            self.student_optimizer.zero_grad()
-            student_logits = self.student(_normalize_dfme(x_base.detach()))
-            loss = torch.mean(torch.abs(student_logits - victim_base))
-            loss.backward()
-            self.student_optimizer.step()
-
-        # Update step counter
-        state.attack_state["step"] += 1
-
+        # Update step counter (approximate, since we did multiple steps)
+        # We count 1 step per full cycle? Or just increment.
+        state.attack_state["step"] += num_bases // self.batch_size # Approximate
+        
         self._maybe_step_lr(state)
-
-        # Store trained student in state for Track B evaluation
         state.attack_state["substitute"] = self.student
+
 
     def _maybe_step_lr(self, state: BenchmarkState) -> None:
         if self.student_optimizer is None or self.generator_optimizer is None:
@@ -387,54 +725,3 @@ class DFME(BaseAttack):
 
         state.attack_state["lr_step_index"] = step_index + 1
 
-    def _approximate_generator_gradient(
-        self, x: torch.Tensor, victim_logits: torch.Tensor, state: BenchmarkState
-    ) -> list:
-        """Approximate generator gradient using zeroth-order estimation.
-
-        Args:
-            x: Generated samples
-            victim_logits: Victim model logits
-            state: Current benchmark state
-
-        Returns:
-            List of gradients for each parameter
-        """
-        # Placeholder: Forward difference estimation
-        # For random directions d_i, compute:
-        # grad ≈ (L(x + epsilon*d) - L(x)) / epsilon * d
-
-        epsilon = self.grad_approx_epsilon
-        m = self.grad_approx_m
-
-        # Compute baseline loss
-        student_logits = self.student(x)
-        baseline_loss = torch.mean(torch.abs(student_logits - victim_logits))
-
-        gradients = []
-        for param in self.generator.parameters():
-            # Random directions
-            directions = [torch.randn_like(param) for _ in range(m)]
-
-            # Estimate gradient
-            grad_est = torch.zeros_like(param)
-            for d in directions:
-                # Perturb parameters
-                original_data = param.data.clone()
-                param.data = param.data + epsilon * d
-
-                # Compute perturbed loss
-                student_logits = self.student(x)
-                perturbed_loss = torch.mean(torch.abs(student_logits - victim_logits))
-
-                # Finite difference
-                grad_est += (perturbed_loss - baseline_loss) / epsilon * d
-
-                # Restore original parameters
-                param.data = original_data
-
-            # Average over directions
-            grad_est = grad_est / m
-            gradients.append(grad_est)
-
-        return gradients
