@@ -104,19 +104,41 @@ class InverseNet(BaseAttack):
         phase = state.attack_state["phase"]
 
         if phase == 3 and self.inversion_model is not None:
-            y_store = state.attack_state["inversion_y"]
-            if len(y_store) > 0:
-                y_all = torch.cat(y_store, dim=0)
-                idx = torch.randint(0, y_all.size(0), (k,))
-                y_sample = y_all[idx]
-                device = state.metadata.get("device", "cpu")
-                y_sample = y_sample.to(device)
-                with torch.no_grad():
-                    x = self.inversion_model(y_sample)
-                # Paper Phase 3: augmentation happens before victim re-query.
-                x = self._augment_inversion(x)
-                meta = {"phase": phase, "synthetic": True, "augmented": True}
-                return QueryBatch(x=x, meta=meta)
+            # Paper Phase 3: "Average" samples per class.
+            # Generate synthetic vectors: one-hot (1.0) and variations (0.9, 0.8)
+            # instead of sampling from historical victim outputs.
+            device = state.metadata.get("device", "cpu")
+            
+            # 1. Define confidence levels for diversity
+            confidences = [1.0, 0.9, 0.8]
+            templates = []
+            
+            # 2. Generate target vectors for each class
+            for c in range(self.num_classes):
+                for conf in confidences:
+                    y = torch.zeros(self.num_classes, device=device)
+                    if conf == 1.0:
+                        y[c] = 1.0
+                    else:
+                        # Distribute remainder uniformly to keep sum=1.0 (valid probability)
+                        # This matches the distribution of _truncate_logits outputs used in training
+                        remainder = (1.0 - conf) / (self.num_classes - 1 + 1e-8)
+                        y.fill_(remainder)
+                        y[c] = conf
+                    templates.append(y)
+            
+            # 3. Sample from these templates to fill batch k
+            templates = torch.stack(templates)
+            idx = torch.randint(0, templates.size(0), (k,))
+            y_sample = templates[idx]
+
+            with torch.no_grad():
+                x = self.inversion_model(y_sample)
+            
+            # Paper Phase 3: augmentation happens before victim re-query.
+            x = self._augment_inversion(x)
+            meta = {"phase": phase, "synthetic": True, "augmented": True}
+            return QueryBatch(x=x, meta=meta)
 
         if len(self.pool_dataset) == 0:
             input_shape = state.metadata.get("input_shape", (3, 32, 32))
@@ -253,10 +275,25 @@ class InverseNet(BaseAttack):
         return truncated
 
     def _augment_inversion(self, x: torch.Tensor) -> torch.Tensor:
+        # Custom Gaussian Noise transform
+        class GaussianNoise:
+            def __init__(self, mean=0.0, std=0.1):
+                self.mean = mean
+                self.std = std
+                
+            def __call__(self, img):
+                noise = torch.randn_like(img) * self.std + self.mean
+                return torch.clamp(img + noise, 0.0, 1.0)
+        
         aug = transforms.Compose(
             [
+                transforms.RandomResizedCrop(x.shape[-2:], scale=(0.8, 1.0), ratio=(0.9, 1.1)),
                 transforms.RandomHorizontalFlip(p=0.5),
+                transforms.RandomRotation(degrees=15),
+                transforms.RandomAffine(degrees=0, translate=(0.1, 0.1), shear=10, scale=(0.9, 1.1)),
+                transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
                 transforms.RandomApply([transforms.GaussianBlur(3)], p=0.2),
+                transforms.RandomApply([GaussianNoise(mean=0.0, std=0.05)], p=0.3),
             ]
         )
         return aug(x)
@@ -314,18 +351,34 @@ class InverseNet(BaseAttack):
         if len(self.pool_dataset) == 0:
             return []
 
+        # Phase 2 (HCSS): Remove coreset overlap as per paper
+        if phase == 2:
+            all_indices = np.arange(len(self.pool_dataset))
+            coreset_centers = state.attack_state.get("coreset_centers", [])
+            
+            if len(coreset_centers) > 0:
+                available = np.setdiff1d(all_indices, np.array(coreset_centers))
+            else:
+                available = all_indices
+                
+            candidate_count = min(len(available), self.max_pool_eval)
+            if candidate_count == 0:
+                candidates = []
+            else:
+                candidates = np.random.choice(available, candidate_count, replace=False).tolist()
+
+            substitute = state.attack_state.get("substitute")
+            if substitute is None:
+                return candidates[: min(k, len(candidates))]
+            return self._hcss_select(k, candidates, substitute)
+
+        # Phase 1 (Coreset) or others: Select from full pool
         candidate_count = min(len(self.pool_dataset), self.max_pool_eval)
         candidates = np.random.choice(len(self.pool_dataset), candidate_count, replace=False).tolist()
 
-        substitute = state.attack_state.get("substitute")
-        if substitute is None:
-            return candidates[: min(k, len(candidates))]
-
         if phase == 1:
             return self._coreset_select(k, candidates, state)
-        if phase == 2:
-            return self._hcss_select(k, candidates, substitute)
-
+            
         return candidates[: min(k, len(candidates))]
 
     def _coreset_select(self, k: int, candidates: List[int], state: BenchmarkState) -> List[int]:
