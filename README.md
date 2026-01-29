@@ -19,7 +19,8 @@
 
 **Model Extraction Benchmark** is a PyTorch-based framework designed to solve the "evaluation crisis" in model stealing research. By enforcing a **strict, validation-first contract**, it ensures that performance differences between attacks reflect actual algorithmic improvements, not inconsistent training recipes or budget accounting.
 
-### Why this benchmark?
+### Key Features
+- **📚 13+ Implemented Attacks**: From classical Active Learning to state-of-the-art Data-Free Generative methods.
 - **⚖️ Fair Comparison**: Eliminates "trick" variables (e.g., different substitute architectures, training schedules, or normalization).
 - **🔒 Strict Contract**: Enforces **1 query = 1 image**. No hidden API calls.
 - **🔄 Two-Track Evaluation**:
@@ -105,6 +106,10 @@ model-extraction-benchmark/
 ├── configs/                 # YAML Configuration files
 │   ├── matrix/              # Generated full-benchmark configs
 │   └── debug/               # Minimal configs for testing
+├── docs/                    # Documentation
+│   ├── reference/           # Implementation details & notes
+│   ├── technical_reports/   # Analysis & experiment reports
+│   └── archive/             # Archived design documents
 ├── runs/                    # Experiment outputs (metrics, logs)
 ├── data/                    # Datasets (CIFAR, MNIST, etc.)
 ├── papers/                  # Reference papers (PDFs)
@@ -116,6 +121,8 @@ model-extraction-benchmark/
 ## 📜 Contract & Methodology
 
 For a deep dive into the benchmark's philosophy, precise budget definitions, and "Track A vs Track B" protocol, please read the **[Contract & Implementation Guide](Model_Extraction_Benchmark_v1.0.1_Contract_and_Implementation_Guide.md)**.
+
+For implementation details of specific attacks, see [docs/reference/](docs/reference/).
 
 ### Key Rules
 1.  **Budget**: `1 query` = `1 image`. Batched queries count as `batch_size`.
