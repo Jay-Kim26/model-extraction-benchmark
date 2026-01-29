@@ -46,6 +46,13 @@ papers/*.txt
 *.ckpt
 wandb/
 
+# Generated Artifacts
+matrix_results_*.csv
+matrix_results_*.tex
+reports/
+results/
+
+
 # Editor
 .vscode/
 .idea/
